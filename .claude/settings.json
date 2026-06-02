@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "project": "Video Reposter — Batch Processing & License Management System",
+  "description": "Windows desktop app for batch video processing with online license activation and admin dashboard.",
+  "model": "claude-opus-4-5",
+  "context_files": [
+    ".claude/common-prompt.md",
+    "docs/plan.md",
+    "docs/requirements.md",
+    "README.md"
+  ],
+  "design_references": [
+    "Designs/License Activation.png",
+    "Designs/Dashboard.png",
+    "Designs/Admin Dashboard.png",
+    "Designs/License.png"
+  ],
+  "worktree_refs": [
+    "Claude/Worktree/main-worktree.md",
+    "Claude/Worktree/initialization.md",
+    "Claude/Worktree/processing-queue.md",
+    "Claude/Worktree/monitoring.md",
+    "Claude/Worktree/admin-actions.md",
+    "Claude/Worktree/export-logs.md"
+  ],
+  "agent_refs": [
+    "Claude/Agents/license-agent.md",
+    "Claude/Agents/processing-agent.md",
+    "Claude/Agents/analytics-agent.md",
+    "Claude/Agents/user-agent.md"
+  ],
+  "skill_refs": [
+    "Claude/Skills/license-validation.md",
+    "Claude/Skills/batch-processing.md",
+    "Claude/Skills/analytics-reporting.md",
+    "Claude/Skills/notification-system.md",
+    "Claude/Skills/auto-update-detection.md"
+  ],
+  "rules": {
+    "always_read_plan_first": true,
+    "always_check_design_for_ui_tasks": true,
+    "never_hardcode_secrets": true,
+    "use_env_variables": true,
+    "keep_code_modular": true,
+    "test_after_implementation": true
+  },
+  "color_palette": {
+    "primary": "#3B82F6",
+    "primary_hover": "#2563EB",
+    "primary_active": "#1D4ED8",
+    "background_dark": "#0F172A",
+    "surface": "#1E293B",
+    "text_primary": "#F8FAFC",
+    "text_secondary": "#94A3B8",
+    "success": "#22C55E",
+    "warning": "#F59E0B",
+    "error": "#EF4444"
+  }
+}

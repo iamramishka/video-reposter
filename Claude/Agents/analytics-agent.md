@@ -1,0 +1,228 @@
+# 📊 Analytics Agent
+
+## Overview
+The Analytics Agent collects, aggregates, and reports on all system activity — including video processing metrics, license usage, user behavior, and system performance. It generates PDF and CSV reports for admins and keeps a live data feed for the dashboard.
+
+---
+
+## Responsibilities
+
+| Task | Trigger | Output |
+|------|---------|--------|
+| Collect processing stats | After each video completes | Updated metrics store |
+| Aggregate daily summaries | Daily at midnight | Day-summary JSON |
+| Generate PDF report | Admin request | PDF file saved locally |
+| Generate CSV export | Admin request | CSV file saved locally |
+| Track license usage | On validation events | License metrics updated |
+| Feed live dashboard data | Every 5 seconds | Dashboard stats refreshed |
+| Store historical data | Continuous | Local SQLite DB |
+| Detect anomalies | After batch complete | Alert if error rate > 10% |
+
+---
+
+## Agent Workflow
+
+```
+START
+  │
+  ▼
+[1] LISTEN for events
+  │   - video:done
+  │   - video:failed
+  │   - batch:complete
+  │   - license:valid
+  │   - license:expired
+  │   - user:login
+  │
+  ▼
+[2] PROCESS each event
+  │   Extract: timestamp, type, user, duration, file_size, error
+  │
+  ▼
+[3] WRITE to local analytics store
+  │   Format: SQLite DB at C:/VideoReposter/Data/analytics.db
+  │
+  ▼
+[4] UPDATE live metrics cache (in-memory)
+  │   Used by Dashboard for real-time display
+  │
+  ▼
+[5] CHECK aggregation trigger
+  │   ├─ Midnight? ──► Run daily aggregation
+  │   ├─ Admin PDF request? ──► Run report generation
+  │   └─ Admin CSV request? ──► Run export
+  │
+  ▼
+[6] DETECT anomalies
+  │   Error rate = failed / total
+  │   If error rate > 10% ──► Emit alert:high-failure-rate
+  │
+  ▼
+[7] SERVE metrics to dashboard (polling every 5s)
+END
+```
+
+---
+
+## Metrics Collected
+
+### Video Processing Metrics
+```
+Total videos processed (all time)
+Total videos processed (today)
+Total videos failed (all time / today)
+Average processing time per video (seconds)
+Average file size processed (MB)
+Total data processed (GB)
+Processing success rate (%)
+Most used preset
+Peak processing hour (0–23)
+```
+
+### License Metrics
+```
+Total licenses issued
+Active licenses count
+Expired licenses count
+Revoked licenses count
+Licenses expiring in 30 days
+Average license age (days)
+Most popular license plan
+License renewals this month
+```
+
+### System Performance Metrics
+```
+Average CPU usage during processing (%)
+Average RAM usage during processing (MB)
+Disk space used by outputs (GB)
+Disk space used by logs (MB)
+Uptime (hours)
+App version in use
+```
+
+---
+
+## Report Templates
+
+### Daily Summary Report
+```
+Date: YYYY-MM-DD
+──────────────────────────────────
+Videos Processed: 142
+Videos Failed: 3
+Success Rate: 97.9%
+Total Data Processed: 18.4 GB
+Average Processing Time: 00:01:23
+Most Used Preset: instagram-reel
+──────────────────────────────────
+Top Errors:
+  1. PROC_003 - Worker timeout (2x)
+  2. PROC_001 - Unsupported format (1x)
+──────────────────────────────────
+License Events:
+  - 2 renewals processed
+  - 0 revocations
+──────────────────────────────────
+```
+
+### Admin Full Report (PDF)
+Sections:
+1. Executive Summary
+2. Processing Statistics (charts)
+3. License Overview (table + chart)
+4. Error Log Summary
+5. System Performance Graphs
+6. Recommendations
+
+---
+
+## Database Schema (SQLite)
+
+### Table: `processing_events`
+```sql
+CREATE TABLE processing_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  video_id    TEXT NOT NULL,
+  filename    TEXT NOT NULL,
+  preset      TEXT,
+  status      TEXT CHECK(status IN ('done', 'failed', 'skipped')),
+  duration_s  REAL,
+  file_size_mb REAL,
+  error_code  TEXT,
+  worker_id   INTEGER,
+  started_at  DATETIME,
+  completed_at DATETIME
+);
+```
+
+### Table: `license_events`
+```sql
+CREATE TABLE license_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  license_key TEXT NOT NULL,
+  event_type  TEXT CHECK(event_type IN ('validate','activate','expire','revoke','renew','reset')),
+  plan        TEXT,
+  user_email  TEXT,
+  device_id   TEXT,
+  occurred_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Table: `daily_summaries`
+```sql
+CREATE TABLE daily_summaries (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  date                 DATE UNIQUE,
+  total_processed      INTEGER,
+  total_failed         INTEGER,
+  total_skipped        INTEGER,
+  total_data_gb        REAL,
+  avg_duration_s       REAL,
+  top_preset           TEXT,
+  licenses_active      INTEGER,
+  licenses_expired     INTEGER,
+  generated_at         DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## Export Formats
+
+### CSV Export Fields
+```
+date, filename, preset, status, duration_seconds, file_size_mb,
+error_code, worker_id, started_at, completed_at
+```
+
+### PDF Report Contents
+```
+Cover page (logo, date range, generated by)
+Page 1: Processing summary table + bar chart
+Page 2: License usage pie chart + table
+Page 3: Error breakdown + recommendations
+Page 4: System performance line graphs
+Footer: App version, report ID, timestamp
+```
+
+---
+
+## Anomaly Detection Rules
+
+| Rule | Threshold | Action |
+|------|-----------|--------|
+| High failure rate | > 10% failures in batch | Emit `alert:high-failure-rate` |
+| Disk space low | < 5 GB free | Emit `alert:low-disk-space` |
+| Processing stalled | No progress for > 5 min | Emit `alert:stalled-worker` |
+| License expiry surge | > 5 licenses expiring in 7 days | Alert admin |
+
+---
+
+## Files Used by This Agent
+
+```
+Claude/Skills/analytics-reporting.md    ← Report generation logic
+Claude/Worktree/export-logs.md          ← Export and log pipeline
+Claude/Worktree/monitoring.md           ← Live monitoring data feed
+```

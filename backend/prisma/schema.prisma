@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LicenseStatus {
+  pending
+  active
+  expired
+  revoked
+}
+
+enum Plan {
+  starter
+  pro
+  enterprise
+}
+
+enum AdminRole {
+  super_admin
+  admin
+  read_only
+}
+
+model User {
+  id        String    @id @default(cuid())
+  name      String
+  email     String    @unique
+  company   String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  licenses  License[]
+}
+
+model License {
+  id             String        @id @default(cuid())
+  key            String        @unique
+  plan           Plan          @default(pro)
+  status         LicenseStatus @default(pending)
+  deviceId       String?
+  hostname       String?
+  os             String?
+  activatedAt    DateTime?
+  expiresAt      DateTime
+  lastVerifiedAt DateTime?
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id])
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  auditLogs      AuditLog[]
+
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  role         AdminRole @default(admin)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  auditLogs    AuditLog[]
+}
+
+model AuditLog {
+  id          String     @id @default(cuid())
+  action      String
+  subjectType String
+  subjectId   String?
+  metadata    Json?
+  adminUserId String?
+  adminUser   AdminUser? @relation(fields: [adminUserId], references: [id])
+  licenseId   String?
+  license     License?   @relation(fields: [licenseId], references: [id])
+  createdAt   DateTime   @default(now())
+
+  @@index([action])
+  @@index([createdAt])
+}

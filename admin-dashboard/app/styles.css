@@ -1,0 +1,436 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f8fbff;
+  color: #0f172a;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.login-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: linear-gradient(160deg, #eef7ff, #ffffff);
+}
+
+.login-panel {
+  display: grid;
+  gap: 14px;
+  width: min(440px, calc(100vw - 32px));
+  padding: 34px;
+  border: 1px solid #dbe7f8;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+}
+
+.admin-mark {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  color: white;
+  border-radius: 8px;
+  background: #2563eb;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+p {
+  color: #475569;
+}
+
+input,
+select {
+  height: 42px;
+  padding: 0 12px;
+  color: #0f172a;
+  border: 1px solid #cbd7ea;
+  border-radius: 6px;
+  background: white;
+}
+
+.primary,
+.header-actions button,
+.actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 6px;
+  border: 1px solid #bfdbfe;
+  color: #2563eb;
+  background: white;
+  font-weight: 800;
+}
+
+.primary {
+  color: white;
+  border-color: #2563eb;
+  background: #2563eb;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.alert {
+  padding: 12px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.admin-shell {
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  min-height: 100vh;
+}
+
+aside {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px 18px;
+  border-right: 1px solid #dbe7f8;
+  background: #f4f8ff;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 24px;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.brand svg {
+  color: #2563eb;
+}
+
+aside button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+aside button.active {
+  color: white;
+  background: #2563eb;
+}
+
+.workspace {
+  padding: 30px 34px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 16px;
+  margin: 26px 0 18px;
+}
+
+.stat-card,
+.create-panel,
+.activity-panel,
+.table-panel {
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: white;
+}
+
+.stat-card {
+  display: grid;
+  gap: 6px;
+  padding: 22px;
+}
+
+.stat-card strong {
+  font-size: 30px;
+}
+
+.stat-card span {
+  color: #475569;
+}
+
+.create-panel,
+.activity-panel,
+.table-panel {
+  padding: 22px;
+  margin-top: 18px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.panel-heading svg {
+  color: #2563eb;
+}
+
+.activity-tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.activity-tools select {
+  min-width: 150px;
+}
+
+.activity-list {
+  display: grid;
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.activity-item {
+  display: grid;
+  grid-template-columns: 12px minmax(210px, 1fr) minmax(220px, 0.9fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 58px;
+  padding: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.activity-item:last-child {
+  border-bottom: 0;
+}
+
+.activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2563eb;
+}
+
+.activity-item strong {
+  text-transform: capitalize;
+}
+
+.activity-meta {
+  display: grid;
+  gap: 4px;
+  color: #475569;
+  font-size: 13px;
+  text-align: right;
+}
+
+.activity-meta time {
+  color: #64748b;
+}
+
+.create-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr)) auto;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.table-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.table-tools {
+  display: flex;
+  gap: 10px;
+}
+
+.search-box {
+  display: grid;
+  grid-template-columns: 22px minmax(180px, 260px);
+  gap: 8px;
+  align-items: center;
+  height: 42px;
+  padding: 0 10px;
+  border: 1px solid #cbd7ea;
+  border-radius: 6px;
+  background: white;
+}
+
+.search-box input {
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+}
+
+.search-box.compact {
+  grid-template-columns: 22px minmax(150px, 220px);
+}
+
+.license-table {
+  display: grid;
+  grid-template-columns: 210px 1.2fr 0.5fr 0.65fr 0.8fr 190px;
+  align-items: center;
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.license-table > div {
+  min-height: 58px;
+  padding: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.table-head {
+  min-height: 42px !important;
+  color: #475569;
+  background: #f8fbff;
+  font-weight: 900;
+}
+
+.mono {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+}
+
+small {
+  display: block;
+  color: #64748b;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #334155;
+  background: #e2e8f0;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.pill.active {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.pill.pending {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.pill.revoked {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.actions button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+.empty-state {
+  margin-top: 12px;
+  padding: 18px;
+  color: #475569;
+  border: 1px dashed #cbd7ea;
+  border-radius: 6px;
+  background: #f8fbff;
+}
+
+@media (max-width: 1100px) {
+  .admin-shell {
+    grid-template-columns: 1fr;
+  }
+
+  aside {
+    display: none;
+  }
+
+  .stats,
+  .create-grid,
+  .table-title,
+  .table-tools,
+  .panel-heading,
+  .activity-tools,
+  .header-actions {
+    grid-template-columns: repeat(2, 1fr);
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .license-table {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-item {
+    grid-template-columns: 12px 1fr;
+  }
+
+  .activity-meta {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .table-head {
+    display: none;
+  }
+}

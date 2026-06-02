@@ -1,0 +1,111 @@
+import type { PrismaClient } from "@prisma/client";
+import type { LicensePlan, LicenseRecord, LicenseRepository } from "../types.js";
+
+function includeUser() {
+  return { user: { select: { name: true, email: true, company: true } } };
+}
+
+export class PrismaLicenseRepository implements LicenseRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  list(): Promise<LicenseRecord[]> {
+    return this.prisma.license.findMany({
+      include: includeUser(),
+      orderBy: { createdAt: "desc" }
+    }) as Promise<LicenseRecord[]>;
+  }
+
+  findByKey(key: string): Promise<LicenseRecord | null> {
+    return this.prisma.license.findUnique({
+      where: { key },
+      include: includeUser()
+    }) as Promise<LicenseRecord | null>;
+  }
+
+  async create(input: {
+    key: string;
+    plan: LicensePlan;
+    expiresAt: Date;
+    user?: { name: string; email: string; company?: string };
+  }): Promise<LicenseRecord> {
+    const userConnectOrCreate = input.user
+      ? {
+          connectOrCreate: {
+            where: { email: input.user.email },
+            create: {
+              name: input.user.name,
+              email: input.user.email,
+              company: input.user.company
+            }
+          }
+        }
+      : undefined;
+
+    return this.prisma.license.create({
+      data: {
+        key: input.key,
+        plan: input.plan,
+        expiresAt: input.expiresAt,
+        status: "pending",
+        user: userConnectOrCreate
+      },
+      include: includeUser()
+    }) as Promise<LicenseRecord>;
+  }
+
+  activate(key: string, input: { deviceId: string; hostname?: string; os?: string }): Promise<LicenseRecord> {
+    return this.prisma.license.update({
+      where: { key },
+      data: {
+        status: "active",
+        deviceId: input.deviceId,
+        hostname: input.hostname,
+        os: input.os,
+        activatedAt: new Date(),
+        lastVerifiedAt: new Date()
+      },
+      include: includeUser()
+    }) as Promise<LicenseRecord>;
+  }
+
+  touchVerification(key: string): Promise<LicenseRecord> {
+    return this.prisma.license.update({
+      where: { key },
+      data: { lastVerifiedAt: new Date() },
+      include: includeUser()
+    }) as Promise<LicenseRecord>;
+  }
+
+  renew(key: string, expiresAt: Date): Promise<LicenseRecord> {
+    return this.prisma.license.update({
+      where: { key },
+      data: {
+        expiresAt,
+        status: "active"
+      },
+      include: includeUser()
+    }) as Promise<LicenseRecord>;
+  }
+
+  revoke(key: string): Promise<LicenseRecord> {
+    return this.prisma.license.update({
+      where: { key },
+      data: { status: "revoked" },
+      include: includeUser()
+    }) as Promise<LicenseRecord>;
+  }
+
+  resetDevice(key: string): Promise<LicenseRecord> {
+    return this.prisma.license.update({
+      where: { key },
+      data: {
+        deviceId: null,
+        hostname: null,
+        os: null,
+        activatedAt: null,
+        status: "pending"
+      },
+      include: includeUser()
+    }) as Promise<LicenseRecord>;
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "video-reposter",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "desktop-app",
+    "admin-dashboard"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,admin,desktop -c blue,green,magenta \"npm run dev -w backend\" \"npm run dev -w admin-dashboard\" \"npm run dev -w desktop-app\"",
+    "build": "npm run build -w backend && npm run build -w admin-dashboard && npm run build -w desktop-app",
+    "test": "npm run test -w backend && npm run test -w desktop-app",
+    "db:generate": "npm run db:generate -w backend",
+    "db:migrate": "npm run db:migrate -w backend",
+    "db:seed": "npm run db:seed -w backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
