@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
@@ -17,7 +15,7 @@ import {
   UserRound
 } from "lucide-react";
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 const tokenStorageKey = "video-reposter.admin-token";
 
 interface License {
