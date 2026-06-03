@@ -198,6 +198,25 @@ git worktree remove ../video-reposter-license
 
 ---
 
+## 🗄️ Database & Migrations
+
+The license server uses PostgreSQL through Prisma. For local development, create `backend/.env` from `backend/.env.example`, then run:
+
+```bash
+npm run db:migrate
+npm run db:seed
+```
+
+Use `db:migrate` only while creating or changing migrations locally. In deployed environments, apply committed migrations without modifying them:
+
+```bash
+npm run db:deploy
+```
+
+The initial schema lives in `backend/prisma/migrations/20260603000100_init/migration.sql`.
+
+---
+
 ## 📄 License
 
 This project is proprietary. Unauthorized distribution or use is prohibited.

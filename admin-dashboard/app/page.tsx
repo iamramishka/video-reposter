@@ -83,14 +83,22 @@ export default function AdminDashboard() {
 
   async function loadDashboard() {
     setBusy(true);
-    const [licenseResponse, auditResponse] = await Promise.all([
-      fetch(`${apiUrl}/api/licenses`, {
-        headers: { Authorization: `Bearer ${token}` }
-      }),
-      fetch(`${apiUrl}/api/audit-logs?limit=8`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-    ]);
+    let licenseResponse: Response;
+    let auditResponse: Response;
+    try {
+      [licenseResponse, auditResponse] = await Promise.all([
+        fetch(`${apiUrl}/api/licenses`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        fetch(`${apiUrl}/api/audit-logs?limit=8`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      ]);
+    } catch {
+      setBusy(false);
+      setMessage("Could not reach the backend API. Check that it is running on port 4000.");
+      return;
+    }
     const licenseBody = await licenseResponse.json();
     const auditBody = await auditResponse.json();
     setBusy(false);
