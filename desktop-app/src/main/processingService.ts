@@ -1,8 +1,15 @@
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 import { buildFfmpegArgs, parseFfmpegProgress } from "../shared/processing.js";
 import type { FfmpegJob } from "../shared/processing.js";
+
+const require = createRequire(import.meta.url);
+const ffmpegStatic = require("ffmpeg-static") as string | null;
+const ffprobeStatic = require("ffprobe-static") as { path: string };
 
 export type ProcessingStatus = "processing" | "complete" | "failed" | "stopped";
 
@@ -29,18 +36,27 @@ export type ProbeResult = {
 
 type ProcessFactory = (command: string, args: string[]) => ChildProcessWithoutNullStreams;
 
+type ProcessingTools = {
+  ffmpeg: string;
+  ffprobe: string;
+};
+
 export class ProcessingService {
   private readonly processes = new Map<string, ChildProcessWithoutNullStreams>();
+  private readonly tools: ProcessingTools;
 
   constructor(
     private readonly onUpdate: (update: ProcessingUpdate) => void,
-    private readonly processFactory: ProcessFactory = spawn
-  ) {}
+    private readonly processFactory: ProcessFactory = spawn,
+    tools?: ProcessingTools
+  ) {
+    this.tools = tools ?? (processFactory === spawn ? resolveProcessingTools() : { ffmpeg: "ffmpeg", ffprobe: "ffprobe" });
+  }
 
   startJob(request: ProcessingJobRequest) {
     const id = randomUUID();
     const args = buildFfmpegArgs(request);
-    const child = this.processFactory("ffmpeg", args);
+    const child = this.processFactory(this.tools.ffmpeg, args);
     this.processes.set(id, child);
 
     this.onUpdate({ id, status: "processing", progress: 0, message: "FFmpeg started." });
@@ -86,7 +102,7 @@ export class ProcessingService {
 
   async checkFfmpeg() {
     return new Promise<{ available: boolean; message: string }>((resolve) => {
-      const child = this.processFactory("ffmpeg", ["-version"]);
+      const child = this.processFactory(this.tools.ffmpeg, ["-version"]);
       let output = "";
 
       child.stdout.setEncoding("utf8");
@@ -111,7 +127,7 @@ export class ProcessingService {
 
   async probeFile(inputPath: string) {
     return new Promise<ProbeResult>((resolve) => {
-      const child = this.processFactory("ffprobe", [
+      const child = this.processFactory(this.tools.ffprobe, [
         "-v",
         "error",
         "-select_streams",
@@ -149,6 +165,23 @@ export class ProcessingService {
       });
     });
   }
+}
+
+function resolveProcessingTools(): ProcessingTools {
+  return {
+    ffmpeg: resolveToolPath("ffmpeg.exe", ffmpegStatic, "ffmpeg"),
+    ffprobe: resolveToolPath("ffprobe.exe", ffprobeStatic.path, "ffprobe")
+  };
+}
+
+function resolveToolPath(fileName: string, staticPath: string | null | undefined, fallbackCommand: string) {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  if (resourcesPath) {
+    const packagedPath = join(resourcesPath, "bin", fileName);
+    if (existsSync(packagedPath)) return packagedPath;
+  }
+  if (staticPath && existsSync(staticPath)) return staticPath;
+  return fallbackCommand;
 }
 
 function parseProbeJson(output: string): ProbeResult {
