@@ -11,7 +11,7 @@ import { buildFfmpegCommand, isSupportedVideoPath, platformPresets } from "../sh
 import type { ProcessingJobRequest } from "./processingService.js";
 import type { FfmpegJob, ImportedVideoFile, TransformSettings } from "../shared/processing.js";
 
-const serverUrl = process.env.VITE_LICENSE_SERVER_URL ?? "http://localhost:4000";
+const serverUrl = process.env.VITE_LICENSE_SERVER_URL ?? "https://video-reposter.vercel.app";
 const licenseClient = new LicenseClient(serverUrl);
 
 function createWindow() {

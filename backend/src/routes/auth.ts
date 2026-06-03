@@ -3,14 +3,15 @@ import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { config } from "../config.js";
-import type { PrismaAuthRepository } from "../repositories/prismaAuthRepository.js";
 
 const loginSchema = z.object({
   email: z.email(),
   password: z.string().min(1)
 });
 
-export function createAuthRouter(repository: PrismaAuthRepository) {
+export function createAuthRouter(repository: {
+  findAdminByEmail(email: string): Promise<{ id: string; email: string; passwordHash: string; role: string } | null>;
+}) {
   const router = Router();
 
   router.post("/login", async (req, res, next) => {

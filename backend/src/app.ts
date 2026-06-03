@@ -9,25 +9,34 @@ import { LicenseService } from "./services/licenseService.js";
 import { PrismaAuditRepository } from "./repositories/prismaAuditRepository.js";
 import { PrismaLicenseRepository } from "./repositories/prismaLicenseRepository.js";
 import { PrismaAuthRepository } from "./repositories/prismaAuthRepository.js";
+import { SupabaseAuditRepository } from "./repositories/supabaseAuditRepository.js";
+import { SupabaseAuthRepository } from "./repositories/supabaseAuthRepository.js";
+import { SupabaseLicenseRepository } from "./repositories/supabaseLicenseRepository.js";
+import { SupabaseRestClient } from "./repositories/supabaseRestClient.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import type { AuditRepository } from "./types.js";
 
 export function createApp(options?: { licenseService?: LicenseService; auditRepository?: AuditRepository; requireAdminAuth?: boolean }) {
   const app = express();
-  const auditRepository = options?.auditRepository ?? new PrismaAuditRepository(prisma);
-  const licenseService = options?.licenseService ?? new LicenseService(new PrismaLicenseRepository(prisma), auditRepository);
+  const repositories = createRepositories();
+  const auditRepository = options?.auditRepository ?? repositories.auditRepository;
+  const licenseService = options?.licenseService ?? new LicenseService(repositories.licenseRepository, auditRepository);
 
   app.use(helmet());
-  app.use(cors({ origin: config.corsOrigin }));
+  app.use(cors({ origin: resolveCorsOrigin(), credentials: false }));
   app.use(express.json({ limit: "1mb" }));
+  app.use("/api/auth", rateLimit({ windowMs: 60_000, limit: 8, standardHeaders: true, legacyHeaders: false }));
   app.use("/api/license", rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }));
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "video-reposter-api" });
   });
+  app.get("/api/health", (_req, res) => {
+    res.json({ ok: true, service: "video-reposter-api" });
+  });
 
-  app.use("/api/auth", createAuthRouter(new PrismaAuthRepository(prisma)));
+  app.use("/api/auth", createAuthRouter(repositories.authRepository));
   app.use("/api", createLicenseRouter(licenseService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
   app.use("/api", createAuditLogRouter(auditRepository, { requireAdminAuth: options?.requireAdminAuth ?? true }));
 
@@ -37,4 +46,26 @@ export function createApp(options?: { licenseService?: LicenseService; auditRepo
   });
 
   return app;
+}
+
+function createRepositories() {
+  if (config.supabaseUrl && config.supabaseServiceRoleKey) {
+    const client = new SupabaseRestClient(config.supabaseUrl, config.supabaseServiceRoleKey);
+    return {
+      auditRepository: new SupabaseAuditRepository(client),
+      authRepository: new SupabaseAuthRepository(client),
+      licenseRepository: new SupabaseLicenseRepository(client)
+    };
+  }
+
+  return {
+    auditRepository: new PrismaAuditRepository(prisma),
+    authRepository: new PrismaAuthRepository(prisma),
+    licenseRepository: new PrismaLicenseRepository(prisma)
+  };
+}
+
+function resolveCorsOrigin() {
+  if (config.corsOrigin === "*") return "*";
+  return config.corsOrigin.split(",").map((origin) => origin.trim()).filter(Boolean);
 }

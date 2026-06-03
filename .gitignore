@@ -90,3 +90,5 @@ Reports/*.csv
 
 # Electron specific
 desktop-app/.electron-builder-effective-config.yaml
+
+.vercel

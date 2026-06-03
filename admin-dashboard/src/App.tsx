@@ -15,7 +15,7 @@ import {
   UserRound
 } from "lucide-react";
 
-const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+const apiUrl = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 const tokenStorageKey = "video-reposter.admin-token";
 
 interface License {
@@ -49,8 +49,8 @@ export default function AdminDashboard() {
   const [activityQuery, setActivityQuery] = useState("");
   const [activityActionFilter, setActivityActionFilter] = useState("all");
   const [busy, setBusy] = useState(false);
-  const [email, setEmail] = useState("admin@videoreposter.local");
-  const [password, setPassword] = useState("admin12345");
+  const [email, setEmail] = useState("iamramishka@gmail.com");
+  const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [form, setForm] = useState({
     key: "",
