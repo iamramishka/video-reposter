@@ -3,8 +3,10 @@ import express from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { createAuditLogRouter } from "./routes/auditLogs.js";
+import { createAnalyticsRouter } from "./routes/analytics.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createLicenseRouter } from "./routes/licenses.js";
+import { createUserRouter } from "./routes/users.js";
 import { LicenseService } from "./services/licenseService.js";
 import { PrismaAuditRepository } from "./repositories/prismaAuditRepository.js";
 import { PrismaLicenseRepository } from "./repositories/prismaLicenseRepository.js";
@@ -15,9 +17,14 @@ import { SupabaseLicenseRepository } from "./repositories/supabaseLicenseReposit
 import { SupabaseRestClient } from "./repositories/supabaseRestClient.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
-import type { AuditRepository } from "./types.js";
+import type { AuditRepository, AuthRepository } from "./types.js";
 
-export function createApp(options?: { licenseService?: LicenseService; auditRepository?: AuditRepository; requireAdminAuth?: boolean }) {
+export function createApp(options?: {
+  licenseService?: LicenseService;
+  auditRepository?: AuditRepository;
+  authRepository?: AuthRepository;
+  requireAdminAuth?: boolean;
+}) {
   const app = express();
   const repositories = createRepositories();
   const auditRepository = options?.auditRepository ?? repositories.auditRepository;
@@ -37,8 +44,10 @@ export function createApp(options?: { licenseService?: LicenseService; auditRepo
     res.json({ ok: true, service: "video-reposter-api" });
   });
 
-  app.use("/api/auth", createAuthRouter(repositories.authRepository));
+  app.use("/api/auth", createAuthRouter(options?.authRepository ?? repositories.authRepository));
   app.use("/api", createLicenseRouter(licenseService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
+  app.use("/api", createUserRouter(licenseService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
+  app.use("/api", createAnalyticsRouter(licenseService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
   app.use("/api", createAuditLogRouter(auditRepository, { requireAdminAuth: options?.requireAdminAuth ?? true }));
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

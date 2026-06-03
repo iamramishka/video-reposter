@@ -14,6 +14,17 @@ const createSchema = z.object({
   }).optional()
 });
 
+const updateSchema = z.object({
+  key: z.string(),
+  plan: z.enum(["starter", "pro", "enterprise"]).optional(),
+  expiresAt: z.string().optional(),
+  user: z.object({
+    name: z.string().min(1),
+    email: z.email(),
+    company: z.string().optional()
+  }).optional()
+});
+
 function sendError(error: unknown, res: import("express").Response) {
   if (error instanceof LicenseError) {
     return res.status(error.statusCode).json({ code: error.code, message: error.message });
@@ -39,6 +50,15 @@ export function createLicenseRouter(service: LicenseService, options: { requireA
   router.post("/licenses", ...adminOnly, async (req, res, next) => {
     try {
       res.status(201).json({ license: await service.createLicense(createSchema.parse(req.body), getAdminActor(req)) });
+    } catch (error) {
+      const response = sendError(error, res);
+      if (!response) next(error);
+    }
+  });
+
+  router.patch("/license", ...adminOnly, async (req, res, next) => {
+    try {
+      res.json({ license: await service.updateLicense(updateSchema.parse(req.body), getAdminActor(req)) });
     } catch (error) {
       const response = sendError(error, res);
       if (!response) next(error);

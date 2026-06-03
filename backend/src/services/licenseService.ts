@@ -52,6 +52,75 @@ export class LicenseService {
     return (await this.repository.list()).map(toResponse);
   }
 
+  async listUsers() {
+    const licenses = await this.repository.list();
+    const users = new Map<string, {
+      name: string;
+      email: string;
+      company: string | null;
+      license_count: number;
+      active_count: number;
+      pending_count: number;
+      expired_count: number;
+      revoked_count: number;
+      latest_activation: string | null;
+    }>();
+
+    for (const license of licenses) {
+      if (!license.user?.email) continue;
+      const email = license.user.email;
+      const current = users.get(email) ?? {
+        name: license.user.name,
+        email,
+        company: license.user.company,
+        license_count: 0,
+        active_count: 0,
+        pending_count: 0,
+        expired_count: 0,
+        revoked_count: 0,
+        latest_activation: null
+      };
+      current.name = license.user.name;
+      current.company = license.user.company;
+      current.license_count += 1;
+      const status = responseStatus(license);
+      if (status === "active") current.active_count += 1;
+      if (status === "pending") current.pending_count += 1;
+      if (status === "expired") current.expired_count += 1;
+      if (status === "revoked") current.revoked_count += 1;
+      if (license.activatedAt && (!current.latest_activation || license.activatedAt > new Date(current.latest_activation))) {
+        current.latest_activation = license.activatedAt.toISOString();
+      }
+      users.set(email, current);
+    }
+
+    return Array.from(users.values()).sort((a, b) => b.license_count - a.license_count || a.email.localeCompare(b.email));
+  }
+
+  async analytics() {
+    const licenses = await this.repository.list();
+    const initial = {
+      total: licenses.length,
+      active: 0,
+      pending: 0,
+      expired: 0,
+      revoked: 0,
+      activations: 0,
+      expiring_soon: 0,
+      plans: { starter: 0, pro: 0, enterprise: 0 } as Record<LicensePlan, number>
+    };
+
+    return licenses.reduce((summary, license) => {
+      const status = responseStatus(license);
+      summary[status] += 1;
+      if (license.activatedAt) summary.activations += 1;
+      const daysUntilExpiry = (license.expiresAt.getTime() - Date.now()) / 86_400_000;
+      if (status !== "revoked" && daysUntilExpiry >= 0 && daysUntilExpiry <= 30) summary.expiring_soon += 1;
+      summary.plans[license.plan] += 1;
+      return summary;
+    }, initial);
+  }
+
   async createLicense(input: {
     key?: string;
     plan?: LicensePlan;
@@ -77,6 +146,41 @@ export class LicenseService {
 
     await this.audit("license.created", record, { plan: record.plan, expiresAt: record.expiresAt.toISOString() }, actor);
     return toResponse(record);
+  }
+
+  async updateLicense(input: {
+    key: string;
+    plan?: LicensePlan;
+    expiresAt?: string;
+    user?: { name: string; email: string; company?: string };
+  }, actor?: AuditActor) {
+    const key = normalizeLicenseKey(input.key);
+    const license = await this.repository.findByKey(key);
+    if (!license) throw new LicenseError("LIC_001", 404, "License not found");
+
+    const expiresAt = input.expiresAt ? new Date(input.expiresAt) : undefined;
+    if (input.expiresAt && (!expiresAt || Number.isNaN(expiresAt.getTime()))) {
+      throw new LicenseError("LIC_DATE", 400, "expiresAt must be a valid date");
+    }
+
+    const updated = await this.repository.updateDetails(key, {
+      plan: input.plan,
+      expiresAt,
+      user: input.user
+    });
+    await this.audit(
+      "license.updated",
+      updated,
+      {
+        previousPlan: license.plan,
+        plan: updated.plan,
+        previousExpiresAt: license.expiresAt.toISOString(),
+        expiresAt: updated.expiresAt.toISOString(),
+        customerEmail: updated.user?.email ?? null
+      },
+      actor
+    );
+    return toResponse(updated);
   }
 
   async validate(input: z.infer<typeof devicePayloadSchema>) {

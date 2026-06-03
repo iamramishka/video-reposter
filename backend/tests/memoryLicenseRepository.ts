@@ -75,6 +75,21 @@ export class MemoryLicenseRepository implements LicenseRepository {
     });
   }
 
+  updateDetails(
+    key: string,
+    input: {
+      plan?: LicensePlan;
+      expiresAt?: Date;
+      user?: { name: string; email: string; company?: string };
+    }
+  ) {
+    return this.patch(key, {
+      plan: input.plan,
+      expiresAt: input.expiresAt,
+      user: input.user ? { ...input.user, company: input.user.company ?? null } : undefined
+    });
+  }
+
   private patch(key: string, patch: Partial<LicenseRecord>) {
     const existing = this.records.get(key);
     if (!existing) throw new Error("Missing test record");

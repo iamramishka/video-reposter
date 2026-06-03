@@ -108,4 +108,38 @@ export class PrismaLicenseRepository implements LicenseRepository {
       include: includeUser()
     }) as Promise<LicenseRecord>;
   }
+
+  async updateDetails(
+    key: string,
+    input: {
+      plan?: LicensePlan;
+      expiresAt?: Date;
+      user?: { name: string; email: string; company?: string };
+    }
+  ): Promise<LicenseRecord> {
+    const user = input.user
+      ? await this.prisma.user.upsert({
+          where: { email: input.user.email },
+          update: {
+            name: input.user.name,
+            company: input.user.company ?? null
+          },
+          create: {
+            name: input.user.name,
+            email: input.user.email,
+            company: input.user.company ?? null
+          }
+        })
+      : null;
+
+    return this.prisma.license.update({
+      where: { key },
+      data: {
+        plan: input.plan,
+        expiresAt: input.expiresAt,
+        userId: user?.id
+      },
+      include: includeUser()
+    }) as Promise<LicenseRecord>;
+  }
 }

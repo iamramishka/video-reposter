@@ -97,6 +97,22 @@ export class SupabaseLicenseRepository implements LicenseRepository {
     });
   }
 
+  async updateDetails(
+    key: string,
+    input: {
+      plan?: LicensePlan;
+      expiresAt?: Date;
+      user?: { name: string; email: string; company?: string };
+    }
+  ): Promise<LicenseRecord> {
+    const user = input.user ? await this.upsertUser(input.user) : null;
+    return this.updateByKey(key, {
+      plan: input.plan,
+      expiresAt: input.expiresAt?.toISOString(),
+      userId: user?.id
+    });
+  }
+
   private async updateByKey(key: string, body: Record<string, unknown>) {
     const row = await this.client.update<LicenseRow>("License", { key: `eq.${key}` }, body);
     const user = row.userId ? await this.client.getOne<UserRow>("User", { select: "*", id: `eq.${row.userId}` }) : null;

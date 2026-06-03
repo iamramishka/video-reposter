@@ -35,6 +35,27 @@ export interface LicenseRepository {
   renew(key: string, expiresAt: Date): Promise<LicenseRecord>;
   revoke(key: string): Promise<LicenseRecord>;
   resetDevice(key: string): Promise<LicenseRecord>;
+  updateDetails(
+    key: string,
+    input: {
+      plan?: LicensePlan;
+      expiresAt?: Date;
+      user?: { name: string; email: string; company?: string };
+    }
+  ): Promise<LicenseRecord>;
+}
+
+export interface AdminAuthRecord {
+  id: string;
+  email: string;
+  passwordHash: string;
+  role: string;
+}
+
+export interface AuthRepository {
+  findAdminByEmail(email: string): Promise<AdminAuthRecord | null>;
+  findAdminById(id: string): Promise<AdminAuthRecord | null>;
+  updateAdminPassword(id: string, passwordHash: string): Promise<void>;
 }
 
 export interface AuditRepository {

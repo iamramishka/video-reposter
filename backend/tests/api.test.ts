@@ -1,11 +1,13 @@
 import request from "supertest";
 import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { config } from "../src/config.js";
 import { LicenseService } from "../src/services/licenseService.js";
 import { addDays } from "../src/utils/dates.js";
 import { MemoryAuditRepository } from "./memoryAuditRepository.js";
+import { MemoryAuthRepository } from "./memoryAuthRepository.js";
 import { MemoryLicenseRepository } from "./memoryLicenseRepository.js";
 
 describe("license API", () => {
@@ -84,6 +86,40 @@ describe("license API", () => {
     expect(activated.body.valid).toBe(true);
   });
 
+  it("auto-generates keys and allows admins to edit plan and expiry", async () => {
+    const service = new LicenseService(new MemoryLicenseRepository());
+    const app = createApp({ licenseService: service });
+    const token = jwt.sign({ sub: "admin-1", email: "admin@videoreposter.local", role: "admin" }, config.jwtSecret);
+
+    const created = await request(app)
+      .post("/api/licenses")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        plan: "starter",
+        expiresAt: addDays(new Date(), 30).toISOString(),
+        user: { name: "Auto Key", email: "auto@example.com", company: "Auto Studio" }
+      })
+      .expect(201);
+
+    expect(created.body.license.license_key).toMatch(/^VDRP-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+
+    const edited = await request(app)
+      .patch("/api/license")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        key: created.body.license.license_key,
+        plan: "enterprise",
+        expiresAt: addDays(new Date(), 90).toISOString(),
+        user: { name: "Auto Key", email: "auto@example.com", company: "Enterprise Studio" }
+      })
+      .expect(200);
+
+    expect(edited.body.license).toEqual(expect.objectContaining({
+      plan: "enterprise",
+      user: expect.objectContaining({ company: "Enterprise Studio" })
+    }));
+  });
+
   it("reports expired licenses as expired in admin list responses", async () => {
     const service = new LicenseService(new MemoryLicenseRepository());
     const app = createApp({ licenseService: service });
@@ -157,5 +193,103 @@ describe("license API", () => {
         metadata: expect.objectContaining({ plan: "enterprise" })
       })
     ]);
+  });
+
+  it("returns customer summaries and analytics", async () => {
+    const service = new LicenseService(new MemoryLicenseRepository());
+    const app = createApp({ licenseService: service });
+    const token = jwt.sign({ sub: "admin-1", email: "admin@videoreposter.local", role: "admin" }, config.jwtSecret);
+
+    await service.createLicense({
+      key: "VDRP-USER-AAAA-BBBB-0001",
+      plan: "pro",
+      expiresAt: addDays(new Date(), 20).toISOString(),
+      user: { name: "Customer One", email: "customer@example.com", company: "One Co" }
+    });
+    await service.activate({ key: "VDRP-USER-AAAA-BBBB-0001", device_id: "device-customer-0001" });
+    await service.createLicense({
+      key: "VDRP-USER-AAAA-BBBB-0002",
+      plan: "starter",
+      expiresAt: addDays(new Date(), -1).toISOString(),
+      user: { name: "Customer One", email: "customer@example.com", company: "One Co" }
+    });
+
+    const users = await request(app).get("/api/users").set("Authorization", `Bearer ${token}`).expect(200);
+    expect(users.body.users).toEqual([
+      expect.objectContaining({
+        email: "customer@example.com",
+        license_count: 2,
+        active_count: 1,
+        expired_count: 1
+      })
+    ]);
+
+    const analytics = await request(app).get("/api/analytics").set("Authorization", `Bearer ${token}`).expect(200);
+    expect(analytics.body.analytics).toEqual(expect.objectContaining({
+      total: 2,
+      active: 1,
+      expired: 1,
+      activations: 1,
+      expiring_soon: 1,
+      plans: expect.objectContaining({ starter: 1, pro: 1 })
+    }));
+  });
+
+  it("changes admin passwords after verifying the current password", async () => {
+    const passwordHash = await bcrypt.hash("old-password-123", 12);
+    const authRepository = new MemoryAuthRepository({
+      id: "admin-1",
+      email: "admin@videoreposter.local",
+      passwordHash,
+      role: "super_admin"
+    });
+    const app = createApp({ licenseService: new LicenseService(new MemoryLicenseRepository()), authRepository });
+
+    const login = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "admin@videoreposter.local", password: "old-password-123" })
+      .expect(200);
+
+    await request(app)
+      .post("/api/auth/change-password")
+      .set("Authorization", `Bearer ${login.body.token}`)
+      .send({ currentPassword: "wrong-password", newPassword: "new-password-123", confirmPassword: "new-password-123" })
+      .expect(401);
+
+    await request(app)
+      .post("/api/auth/change-password")
+      .set("Authorization", `Bearer ${login.body.token}`)
+      .send({ currentPassword: "old-password-123", newPassword: "new-password-123", confirmPassword: "new-password-123" })
+      .expect(200);
+
+    await request(app)
+      .post("/api/auth/login")
+      .send({ email: "admin@videoreposter.local", password: "old-password-123" })
+      .expect(401);
+
+    await request(app)
+      .post("/api/auth/login")
+      .send({ email: "admin@videoreposter.local", password: "new-password-123" })
+      .expect(200);
+  }, 15_000);
+
+  it("reassigns a license to a new device after device reset", async () => {
+    const service = new LicenseService(new MemoryLicenseRepository());
+    const app = createApp({ licenseService: service });
+    const token = jwt.sign({ sub: "admin-1", email: "admin@videoreposter.local", role: "admin" }, config.jwtSecret);
+
+    await service.createLicense({ key: "VDRP-REAS-SIGN-DEVI-0001", expiresAt: addDays(new Date(), 30).toISOString() });
+    await request(app).post("/api/license/activate").send({ key: "VDRP-REAS-SIGN-DEVI-0001", device_id: "device-original-0001" }).expect(200);
+    await request(app).post("/api/license/validate").send({ key: "VDRP-REAS-SIGN-DEVI-0001", device_id: "device-second-00002" }).expect(409);
+
+    await request(app)
+      .post("/api/license/reset-device")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ key: "VDRP-REAS-SIGN-DEVI-0001" })
+      .expect(200);
+
+    await request(app).post("/api/license/activate").send({ key: "VDRP-REAS-SIGN-DEVI-0001", device_id: "device-second-00002" }).expect(200);
+    await service.revoke("VDRP-REAS-SIGN-DEVI-0001");
+    await request(app).post("/api/license/activate").send({ key: "VDRP-REAS-SIGN-DEVI-0001", device_id: "device-second-00002" }).expect(403);
   });
 });
