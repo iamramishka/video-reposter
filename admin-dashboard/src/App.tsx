@@ -146,7 +146,7 @@ export default function AdminDashboard() {
       setToken(body.token);
       window.localStorage.setItem(tokenStorageKey, body.token);
       setPassword("");
-      setMessage("Signed in.");
+      setMessage("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Login failed");
     } finally {
