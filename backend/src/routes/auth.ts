@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { config } from "../config.js";
 import { getAdminActor, requireAdmin } from "../middleware/auth.js";
-import type { AuthRepository } from "../types.js";
+import type { AuditRepository, AuthRepository } from "../types.js";
 
 const loginSchema = z.object({
   email: z.email(),
@@ -20,7 +20,7 @@ const changePasswordSchema = z.object({
   message: "New passwords do not match"
 });
 
-export function createAuthRouter(repository: AuthRepository) {
+export function createAuthRouter(repository: AuthRepository, auditRepository?: AuditRepository) {
   const router = Router();
 
   router.post("/login", async (req, res, next) => {
@@ -33,6 +33,14 @@ export function createAuthRouter(repository: AuthRepository) {
 
       const token = jwt.sign({ sub: admin.id, email: admin.email, role: admin.role }, config.jwtSecret, {
         expiresIn: "8h"
+      });
+      await auditRepository?.record({
+        action: "admin.login",
+        subjectType: "admin",
+        subjectId: admin.id,
+        adminUserId: admin.id,
+        adminEmail: admin.email,
+        metadata: { role: admin.role }
       });
       res.json({ token, admin: { email: admin.email, role: admin.role } });
     } catch (error) {
@@ -55,6 +63,14 @@ export function createAuthRouter(repository: AuthRepository) {
         return res.status(401).json({ code: "AUTH_INVALID", message: "Current password is incorrect" });
       }
       await repository.updateAdminPassword(admin.id, await bcrypt.hash(body.newPassword, 12));
+      await auditRepository?.record({
+        action: "admin.password_changed",
+        subjectType: "admin",
+        subjectId: admin.id,
+        adminUserId: admin.id,
+        adminEmail: admin.email,
+        metadata: { role: admin.role }
+      });
       res.json({ ok: true });
     } catch (error) {
       if (error instanceof z.ZodError) {

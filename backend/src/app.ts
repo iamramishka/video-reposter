@@ -6,29 +6,37 @@ import { createAuditLogRouter } from "./routes/auditLogs.js";
 import { createAnalyticsRouter } from "./routes/analytics.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createLicenseRouter } from "./routes/licenses.js";
+import { createPackageRouter } from "./routes/packages.js";
 import { createUserRouter } from "./routes/users.js";
 import { LicenseService } from "./services/licenseService.js";
+import { PackageService } from "./services/packageService.js";
 import { PrismaAuditRepository } from "./repositories/prismaAuditRepository.js";
 import { PrismaLicenseRepository } from "./repositories/prismaLicenseRepository.js";
 import { PrismaAuthRepository } from "./repositories/prismaAuthRepository.js";
+import { PrismaPackageRepository } from "./repositories/prismaPackageRepository.js";
 import { SupabaseAuditRepository } from "./repositories/supabaseAuditRepository.js";
 import { SupabaseAuthRepository } from "./repositories/supabaseAuthRepository.js";
 import { SupabaseLicenseRepository } from "./repositories/supabaseLicenseRepository.js";
+import { SupabasePackageRepository } from "./repositories/supabasePackageRepository.js";
 import { SupabaseRestClient } from "./repositories/supabaseRestClient.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
-import type { AuditRepository, AuthRepository } from "./types.js";
+import type { AuditRepository, AuthRepository, PackageRepository } from "./types.js";
 
 export function createApp(options?: {
   licenseService?: LicenseService;
+  packageService?: PackageService;
   auditRepository?: AuditRepository;
   authRepository?: AuthRepository;
+  packageRepository?: PackageRepository;
   requireAdminAuth?: boolean;
 }) {
   const app = express();
   const repositories = createRepositories();
   const auditRepository = options?.auditRepository ?? repositories.auditRepository;
-  const licenseService = options?.licenseService ?? new LicenseService(repositories.licenseRepository, auditRepository);
+  const packageRepository = options?.packageRepository ?? repositories.packageRepository;
+  const packageService = options?.packageService ?? new PackageService(packageRepository, auditRepository);
+  const licenseService = options?.licenseService ?? new LicenseService(repositories.licenseRepository, auditRepository, packageRepository);
 
   app.set("trust proxy", 1);
   app.use(helmet());
@@ -44,10 +52,11 @@ export function createApp(options?: {
     res.json({ ok: true, service: "video-reposter-api" });
   });
 
-  app.use("/api/auth", createAuthRouter(options?.authRepository ?? repositories.authRepository));
+  app.use("/api/auth", createAuthRouter(options?.authRepository ?? repositories.authRepository, auditRepository));
   app.use("/api", createLicenseRouter(licenseService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
   app.use("/api", createUserRouter(licenseService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
   app.use("/api", createAnalyticsRouter(licenseService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
+  app.use("/api", createPackageRouter(packageService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
   app.use("/api", createAuditLogRouter(auditRepository, { requireAdminAuth: options?.requireAdminAuth ?? true }));
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -64,14 +73,16 @@ function createRepositories() {
     return {
       auditRepository: new SupabaseAuditRepository(client),
       authRepository: new SupabaseAuthRepository(client),
-      licenseRepository: new SupabaseLicenseRepository(client)
+      licenseRepository: new SupabaseLicenseRepository(client),
+      packageRepository: new SupabasePackageRepository(client)
     };
   }
 
   return {
     auditRepository: new PrismaAuditRepository(prisma),
     authRepository: new PrismaAuthRepository(prisma),
-    licenseRepository: new PrismaLicenseRepository(prisma)
+    licenseRepository: new PrismaLicenseRepository(prisma),
+    packageRepository: new PrismaPackageRepository(prisma)
   };
 }
 

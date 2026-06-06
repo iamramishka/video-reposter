@@ -75,7 +75,46 @@ describe("ProcessingService", () => {
       return fake;
     }) as never);
 
-    await expect(service.checkFfmpeg()).resolves.toEqual({ available: true, message: "ffmpeg version 7.0" });
+    await expect(service.checkFfmpeg()).resolves.toEqual({
+      available: true,
+      message: "Video processing is ready.",
+      technicalMessage: "ffmpeg version 7.0"
+    });
+  });
+
+  it("returns a non-retryable customer-safe failure when ffmpeg is missing", async () => {
+    const fake = new FakeProcess();
+    const service = new ProcessingService(() => undefined, (() => {
+      queueMicrotask(() => fake.emit("error", new Error("spawn ffmpeg ENOENT")));
+      return fake;
+    }) as never);
+
+    await expect(service.checkFfmpeg()).resolves.toEqual(expect.objectContaining({
+      available: false,
+      message: "Video processing is unavailable. Reinstall Video Reposter or contact support.",
+      failure: expect.objectContaining({ code: "component_unavailable", retryable: false })
+    }));
+  });
+
+  it("keeps technical ffmpeg failure details inside structured metadata", () => {
+    const updates: ProcessingUpdate[] = [];
+    const fake = new FakeProcess();
+    const service = new ProcessingService((update) => updates.push(update), (() => fake) as never);
+
+    service.startJob(sampleJob());
+    fake.stderr.emit("data", "private technical ffmpeg detail");
+    fake.emit("close", 1, null);
+
+    const failure = updates.at(-1);
+    expect(failure).toEqual(expect.objectContaining({
+      status: "failed",
+      message: "Video processing failed. Try again. If it keeps failing, contact support.",
+      failure: expect.objectContaining({
+        retryable: true,
+        technicalMessage: expect.stringContaining("private technical ffmpeg detail")
+      })
+    }));
+    expect(failure?.message).not.toContain("private technical");
   });
 
   it("probes video metadata with ffprobe", async () => {

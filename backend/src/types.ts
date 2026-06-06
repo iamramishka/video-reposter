@@ -1,5 +1,14 @@
 export type LicenseStatus = "pending" | "active" | "expired" | "revoked";
 export type LicensePlan = "starter" | "pro" | "enterprise";
+export type AdminRole = "super_admin" | "admin" | "read_only";
+
+export interface PackageDefinition {
+  plan: LicensePlan;
+  videoLimit: number;
+  templateLimit: number;
+  workerLimit: number;
+  updatedAt: Date;
+}
 
 export interface LicenseRecord {
   id: string;
@@ -45,11 +54,21 @@ export interface LicenseRepository {
   ): Promise<LicenseRecord>;
 }
 
+export interface PackageRepository {
+  list(): Promise<PackageDefinition[]>;
+  upsert(input: {
+    plan: LicensePlan;
+    videoLimit: number;
+    templateLimit: number;
+    workerLimit: number;
+  }): Promise<PackageDefinition>;
+}
+
 export interface AdminAuthRecord {
   id: string;
   email: string;
   passwordHash: string;
-  role: string;
+  role: AdminRole;
 }
 
 export interface AuthRepository {
@@ -61,8 +80,8 @@ export interface AuthRepository {
 export interface AuditRepository {
   record(input: {
     action: string;
-    subjectType: "license";
-    subjectId?: string;
+    subjectType: "license" | "admin";
+    subjectId?: string | null;
     licenseId?: string;
     adminUserId?: string;
     adminEmail?: string;
@@ -74,6 +93,7 @@ export interface AuditRepository {
 export interface AuditActor {
   adminUserId?: string;
   adminEmail?: string;
+  adminRole?: string;
 }
 
 export interface AuditEntry {

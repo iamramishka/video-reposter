@@ -4,6 +4,7 @@
 
 body {
   margin: 0;
+  overflow-x: hidden;
   background: #f8fbff;
   color: #0f172a;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -109,15 +110,18 @@ button svg {
 
 .admin-shell {
   display: grid;
-  grid-template-columns: 250px 1fr;
+  grid-template-columns: 210px minmax(0, 1fr);
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 aside {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 24px 18px;
+  min-width: 0;
+  padding: 24px 18px 24px 12px;
   border-right: 1px solid #dbe7f8;
   background: #f4f8ff;
 }
@@ -130,6 +134,7 @@ aside {
   color: #0f172a;
   font-size: 18px;
   font-weight: 900;
+  min-width: 0;
 }
 
 .brand svg {
@@ -147,6 +152,7 @@ aside button {
   background: transparent;
   color: #0f172a;
   font-weight: 800;
+  min-width: 0;
 }
 
 aside button.active {
@@ -156,6 +162,8 @@ aside button.active {
 
 .workspace {
   padding: 30px 34px;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 header {
@@ -163,11 +171,28 @@ header {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
+  min-width: 0;
 }
 
 .header-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
+  min-width: 0;
+}
+
+.role-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 12px;
+  color: #334155;
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  background: white;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .stats {
@@ -178,6 +203,7 @@ header {
 }
 
 .stat-card,
+.package-card,
 .create-panel,
 .activity-panel,
 .table-panel {
@@ -200,6 +226,89 @@ header {
   color: #475569;
 }
 
+.package-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 26px 0 18px;
+}
+
+.package-card {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.package-card > div:first-child {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.package-card span {
+  color: #475569;
+  font-weight: 800;
+}
+
+.package-card strong {
+  font-size: 32px;
+}
+
+.package-mix {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.package-mix span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.package-limit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.package-limit-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.package-limit-title {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.package-limit-title h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.package-limit-card label {
+  display: grid;
+  gap: 6px;
+}
+
+.package-limit-card label span {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .create-panel,
 .activity-panel,
 .table-panel,
@@ -207,6 +316,12 @@ header {
 .account-panel {
   padding: 22px;
   margin-top: 18px;
+}
+
+.service-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
 }
 
 .panel-heading {
@@ -306,9 +421,18 @@ header {
 
 .create-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr)) auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: 12px;
   margin-top: 16px;
+}
+
+.bulk-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+}
+
+.create-grid .primary,
+.bulk-grid .primary {
+  min-width: 160px;
 }
 
 .table-title {
@@ -320,7 +444,29 @@ header {
 
 .table-tools {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
+}
+
+.table-tools button,
+.table-title > button,
+.compact-row button,
+.detail-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  color: #2563eb;
+  background: white;
+  font-weight: 800;
+}
+
+.company-filter {
+  width: 150px;
 }
 
 .search-box {
@@ -357,9 +503,10 @@ header {
 }
 
 .license-table,
+.package-table,
 .user-table {
   display: grid;
-  grid-template-columns: 220px minmax(190px, 1.2fr) 150px 170px minmax(150px, 0.8fr) 250px;
+  grid-template-columns: minmax(150px, 1fr) minmax(160px, 1.3fr) minmax(105px, 0.6fr) minmax(130px, 0.8fr) minmax(115px, 0.9fr) minmax(120px, 0.9fr);
   align-items: center;
   margin-top: 16px;
   overflow: hidden;
@@ -367,15 +514,47 @@ header {
   border-radius: 6px;
 }
 
+.package-table {
+  grid-template-columns: minmax(140px, 1fr) minmax(150px, 1.1fr) minmax(95px, 0.6fr) minmax(140px, 0.9fr) minmax(85px, 0.5fr) minmax(110px, 0.7fr) minmax(110px, 0.8fr);
+}
+
 .user-table {
-  grid-template-columns: minmax(220px, 1.2fr) minmax(150px, 0.8fr) 110px minmax(260px, 1.1fr) minmax(180px, 1fr);
+  grid-template-columns: minmax(200px, 1.2fr) minmax(140px, 0.8fr) 110px minmax(220px, 1.1fr) minmax(170px, 1fr);
 }
 
 .license-table > div,
+.package-table > div,
 .user-table > div {
+  min-width: 0; /* allow cells to shrink so flexible columns fit and long text can truncate */
   min-height: 58px;
   padding: 12px;
   border-bottom: 1px solid #e2e8f0;
+}
+
+/* Keep long emails, hostnames, and device IDs inside their cell instead of pushing the grid wider. */
+.license-table small,
+.package-table small,
+.user-table small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* License keys may wrap at hyphens rather than overflow. */
+.license-table .mono,
+.package-table .mono {
+  overflow-wrap: anywhere;
+}
+
+/* Selects and date inputs fill their cell rather than overflowing it. */
+.license-table select,
+.license-table input,
+.package-table select,
+.package-table input {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .table-head {
@@ -433,6 +612,26 @@ small {
   width: 36px;
   height: 36px;
   padding: 0;
+}
+
+.package-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+  align-items: center;
+}
+
+.package-editor button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  color: #2563eb;
+  background: white;
 }
 
 .status-mix {
@@ -523,16 +722,153 @@ small {
   background: #f8fbff;
 }
 
+.expiry-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(100px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.expiry-grid div,
+.info-block {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fbff;
+}
+
+.expiry-grid strong {
+  font-size: 26px;
+}
+
+.expiry-grid span,
+.info-block span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.compact-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.compact-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+}
+
+.detail-panel {
+  margin-top: 18px;
+  padding: 22px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: white;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.info-block strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.detail-actions input {
+  width: 96px;
+}
+
+@media (max-width: 1300px) {
+  .workspace {
+    padding: 28px 24px;
+  }
+
+  header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .header-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .package-table {
+    grid-template-columns: 1fr;
+  }
+
+  .package-table .table-head {
+    display: none;
+  }
+}
+
+@media (max-width: 1180px) {
+  .admin-shell {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+
+  .stats,
+  .expiry-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1100px) {
   .admin-shell {
     grid-template-columns: 1fr;
   }
 
   aside {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(120px, 1fr));
+    gap: 8px;
+    padding: 12px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid #dbe7f8;
+  }
+
+  .brand {
     display: none;
   }
 
+  aside button {
+    justify-content: center;
+    width: 100%;
+    min-width: 120px;
+  }
+
+  .workspace {
+    padding: 24px;
+  }
+
   .stats,
+  .package-stats,
+  .package-limit-grid,
   .create-grid,
   .table-title,
   .table-tools,
@@ -544,7 +880,13 @@ small {
     align-items: stretch;
   }
 
+  /* Two wide form panels: stack them rather than squeezing side by side. */
+  .service-grid {
+    grid-template-columns: 1fr;
+  }
+
   .license-table,
+  .package-table,
   .user-table {
     grid-template-columns: 1fr;
   }
@@ -567,7 +909,83 @@ small {
     align-items: stretch;
   }
 
+  .expiry-grid,
+  .compact-row,
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
   .table-head {
     display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  aside {
+    grid-template-columns: repeat(6, minmax(112px, 1fr));
+    padding: 10px;
+  }
+
+  aside button {
+    min-width: 112px;
+    padding: 0 10px;
+  }
+
+  .workspace {
+    padding: 20px 14px;
+  }
+
+  .stats,
+  .package-stats,
+  .package-limit-grid,
+  .create-grid,
+  .bulk-grid,
+  .expiry-grid,
+  .metric-grid,
+  .password-grid,
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .create-panel,
+  .activity-panel,
+  .table-panel,
+  .analytics-panel,
+  .account-panel,
+  .detail-panel {
+    padding: 18px;
+  }
+
+  .create-grid .primary,
+  .bulk-grid .primary,
+  .header-actions button,
+  .table-tools button,
+  .table-title > button,
+  .compact-row button,
+  .detail-actions button,
+  .activity-tools select,
+  .company-filter,
+  .search-box {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .search-box,
+  .search-box.compact {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .panel-heading,
+  .table-title,
+  .table-tools,
+  .activity-tools,
+  .header-actions,
+  .detail-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .plan-row {
+    grid-template-columns: 90px 1fr 40px;
   }
 }

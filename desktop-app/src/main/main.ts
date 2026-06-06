@@ -1,40 +1,77 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import type { IpcMainInvokeEvent, OpenDialogOptions } from "electron";
 import { mkdirSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { LicenseClient } from "./licenseClient.js";
 import { appendProcessingLog, getProcessingLogPath } from "./processingLog.js";
 import { ProcessingService } from "./processingService.js";
 import { getStableDeviceId, readLicenseCache, writeLicenseCache } from "./licenseCache.js";
 import { isLicenseKey, normalizeLicenseKey, stateFromCache } from "../shared/license.js";
+import { productName } from "../shared/branding.js";
 import { buildFfmpegCommand, isSupportedVideoPath, platformPresets } from "../shared/processing.js";
+import { invalidVideoFailure, outputFolderFailure } from "../shared/processingFailure.js";
 import type { ProcessingJobRequest } from "./processingService.js";
 import type { FfmpegJob, ImportedVideoFile, TransformSettings } from "../shared/processing.js";
 
 const serverUrl = process.env.VITE_LICENSE_SERVER_URL ?? "https://video-reposter.vercel.app";
 const licenseClient = new LicenseClient(serverUrl);
+let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
-  const mainWindow = new BrowserWindow({
+  const rendererPath = path.join(app.getAppPath(), "dist-renderer/index.html");
+  const window = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1100,
     minHeight: 720,
-    title: "Video Batch Processor",
+    title: productName,
     backgroundColor: "#ffffff",
     webPreferences: {
-      preload: path.join(app.getAppPath(), "dist-electron/preload/preload.js"),
+      preload: path.join(app.getAppPath(), "dist-electron/preload/preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false
     }
   });
+  mainWindow = window;
+
+  window.on("closed", () => {
+    mainWindow = null;
+  });
+
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    const message = `Renderer failed to load ${validatedURL}: ${errorCode} ${errorDescription}`;
+    console.error(message);
+    if (app.isPackaged) {
+      void dialog.showMessageBox(window, {
+        type: "error",
+        title: `${productName} could not load`,
+        message: "The app window could not load its interface.",
+        detail: message
+      });
+    }
+  });
+
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level >= 2) console.error(`[renderer] ${sourceId}:${line} ${message}`);
+  });
 
   if (process.env.VITE_DEV_SERVER_URL) {
-    void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+    void window.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else if (!app.isPackaged) {
-    void mainWindow.loadURL("http://127.0.0.1:5173");
+    void window.loadURL("http://127.0.0.1:5173");
   } else {
-    void mainWindow.loadFile(path.join(app.getAppPath(), "dist-renderer/index.html"));
+    void window.loadFile(rendererPath).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "Unknown renderer load error";
+      console.error(`Renderer loadFile failed for ${rendererPath}: ${message}`);
+      void dialog.showMessageBox(window, {
+        type: "error",
+        title: `${productName} could not load`,
+        message: "The app window could not load its interface.",
+        detail: message
+      });
+    });
   }
 }
 
@@ -83,15 +120,29 @@ function getVideoFilesInFolder(folderPath: string) {
 function getDefaultOutputPath(inputPath: string, presetId: string, selectedOutputDir?: string) {
   const parsed = path.parse(inputPath);
   const outputDir = selectedOutputDir?.trim() ? selectedOutputDir : path.join(parsed.dir, "VideoReposterOutput");
-  mkdirSync(outputDir, { recursive: true });
+  mkdirSync(outputDir, { recursive: true }); // may throw — caller wraps in try-catch
   return path.join(outputDir, `${parsed.name}_${presetId}_processed.mp4`);
+}
+
+function showOpenDialogWithParent(event: IpcMainInvokeEvent, options: OpenDialogOptions) {
+  const parent = BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? BrowserWindow.getFocusedWindow();
+  if (parent) {
+    if (parent.isMinimized()) parent.restore();
+    parent.show();
+    parent.focus();
+  }
+  return parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options);
 }
 
 app.whenReady().then(() => {
   const processingService = new ProcessingService((update) => {
-    appendProcessingLog(app.getPath("userData"), `[${update.status}] ${update.id} ${update.progress}% ${update.message ?? ""}`.trim());
+    appendProcessingLog(app.getPath("userData"), `[${update.status}] ${update.id} ${update.progress}% ${update.failure?.technicalMessage ?? update.message ?? ""}`.trim());
     BrowserWindow.getAllWindows().forEach((window) => window.webContents.send("processing:update", update));
   });
+
+  // Kill any in-flight FFmpeg jobs when the app is quitting so we never leave
+  // orphaned encoder processes running in the background.
+  app.on("before-quit", () => processingService.stopAll());
 
   ipcMain.handle("license:getDeviceInfo", () => getDeviceInfo());
 
@@ -126,6 +177,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle("shell:openExternal", (_event, url: string) => shell.openExternal(url));
   ipcMain.handle("shell:showItemInFolder", (_event, filePath: string) => shell.showItemInFolder(filePath));
+  ipcMain.handle("files:getPreviewUrl", (_event, filePath: string) => isSupportedVideoPath(filePath) ? pathToFileURL(filePath).href : null);
   ipcMain.handle("processing:appendLog", (_event, message: string) => appendProcessingLog(app.getPath("userData"), message));
   ipcMain.handle("processing:getLogPath", () => getProcessingLogPath(app.getPath("userData")));
   ipcMain.handle("processing:openLog", () => shell.openPath(getProcessingLogPath(app.getPath("userData"))));
@@ -137,10 +189,17 @@ app.whenReady().then(() => {
   ipcMain.handle("processing:startFile", async (_event, inputPath: string, presetId = "instagram-reel", outputDir?: string, transforms?: TransformSettings) => {
     const preset = platformPresets.find((item) => item.id === presetId) ?? platformPresets.find((item) => item.id === "instagram-reel");
     if (!preset) throw new Error("Default processing preset is missing.");
-    const outputPath = getDefaultOutputPath(inputPath, preset.id, outputDir);
+    let outputPath: string;
+    try {
+      outputPath = getDefaultOutputPath(inputPath, preset.id, outputDir);
+    } catch (error) {
+      const failure = outputFolderFailure(`Could not create output folder: ${error instanceof Error ? error.message : String(error)}`);
+      return { ok: false, message: failure.message, failure };
+    }
     const probe = await processingService.probeFile(inputPath);
     if (!probe.valid) {
-      return { ok: false, message: probe.message ?? "Video validation failed." };
+      const failure = invalidVideoFailure(probe.message ?? "Video validation failed.");
+      return { ok: false, message: failure.message, failure };
     }
     return {
       ok: true,
@@ -157,23 +216,23 @@ app.whenReady().then(() => {
     };
   });
   ipcMain.handle("processing:stopJob", (_event, id: string) => processingService.stopJob(id));
-  ipcMain.handle("files:selectVideos", async () => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle("files:selectVideos", async (event) => {
+    const result = await showOpenDialogWithParent(event, {
       title: "Select videos",
       properties: ["openFile", "multiSelections"],
       filters: [{ name: "Videos", extensions: ["mp4", "mov", "avi", "mkv", "webm", "flv"] }]
     });
     return result.canceled ? [] : getImportedVideoFiles(result.filePaths);
   });
-  ipcMain.handle("files:selectVideoFolder", async () => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle("files:selectVideoFolder", async (event) => {
+    const result = await showOpenDialogWithParent(event, {
       title: "Select video folder",
       properties: ["openDirectory"]
     });
     return result.canceled || !result.filePaths[0] ? [] : getVideoFilesInFolder(result.filePaths[0]);
   });
-  ipcMain.handle("files:selectOutputFolder", async () => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle("files:selectOutputFolder", async (event) => {
+    const result = await showOpenDialogWithParent(event, {
       title: "Select output folder",
       properties: ["openDirectory", "createDirectory"]
     });

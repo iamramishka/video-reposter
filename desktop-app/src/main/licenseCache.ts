@@ -38,7 +38,13 @@ export function decryptLicenseCache(payload: string, deviceId: string): CachedLi
 export function readLicenseCache(appDataPath: string, deviceId: string) {
   const cachePath = getCachePath(appDataPath);
   if (!fs.existsSync(cachePath)) return null;
-  return decryptLicenseCache(fs.readFileSync(cachePath, "utf8"), deviceId);
+  try {
+    return decryptLicenseCache(fs.readFileSync(cachePath, "utf8"), deviceId);
+  } catch {
+    // Corrupt or unreadable cache (e.g. AES-GCM auth tag failure, device ID mismatch).
+    // Treat as no license rather than crashing the app.
+    return null;
+  }
 }
 
 export function writeLicenseCache(appDataPath: string, cache: CachedLicense) {

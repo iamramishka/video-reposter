@@ -9,8 +9,10 @@
   ],
   "scripts": {
     "dev": "concurrently -n backend,admin,desktop -c blue,green,magenta \"npm run dev -w backend\" \"npm run dev -w admin-dashboard\" \"npm run dev -w desktop-app\"",
+    "app:browser": "npm run browser -w desktop-app",
     "build": "npm run build -w backend && npm run build -w admin-dashboard && npm run build -w desktop-app",
     "test": "npm run test -w backend && npm run test -w desktop-app",
+    "verify:windows-release": "powershell -ExecutionPolicy Bypass -File scripts/verify-windows-release.ps1",
     "db:generate": "npm run db:generate -w backend",
     "db:migrate": "npm run db:migrate -w backend",
     "db:deploy": "npm run db:deploy -w backend",

@@ -5,13 +5,19 @@ import {
   Ban,
   BarChart3,
   CalendarPlus,
+  ChevronLeft,
+  ChevronRight,
   Check,
   Copy,
+  Download,
+  Eye,
   KeyRound,
   LayoutDashboard,
   LockKeyhole,
   LogIn,
   LogOut,
+  MessageCircle,
+  PackageCheck,
   Plus,
   RefreshCcw,
   RotateCcw,
@@ -24,14 +30,19 @@ import {
 
 const apiUrl = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 const tokenStorageKey = "video-reposter.admin-token";
+const activityPageSize = 6;
 
 type Plan = "starter" | "pro" | "enterprise";
 type Status = "pending" | "active" | "expired" | "revoked";
-type Tab = "dashboard" | "licenses" | "users" | "analytics" | "account";
+type Tab = "dashboard" | "licenses" | "users" | "analytics" | "packages" | "account";
+type AdminRole = "super_admin" | "admin" | "read_only";
+type ExpiryFilter = "all" | "1" | "7" | "14" | "30" | "expired";
+type DeviceFilter = "all" | "bound" | "unbound";
 
 interface License {
   license_key: string;
   plan: Plan;
+  package_limits?: PackageLimits;
   status: Status;
   device_id: string | null;
   hostname: string | null;
@@ -40,6 +51,17 @@ interface License {
   expires_at: string;
   last_verified: string | null;
   user: { name: string; email: string; company: string | null } | null;
+}
+
+interface PackageLimits {
+  video_limit: number;
+  template_limit: number;
+  worker_limit: number;
+}
+
+interface PackageDefinition extends PackageLimits {
+  plan: Plan;
+  updated_at: string;
 }
 
 interface AuditLog {
@@ -96,21 +118,35 @@ const emptyAnalytics: Analytics = {
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [token, setToken] = useState("");
+  const [admin, setAdmin] = useState<{ email: string; role: AdminRole } | null>(null);
   const [licenses, setLicenses] = useState<License[]>([]);
   const [users, setUsers] = useState<Customer[]>([]);
   const [analytics, setAnalytics] = useState<Analytics>(emptyAnalytics);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [packages, setPackages] = useState<PackageDefinition[]>([]);
   const [query, setQuery] = useState("");
   const [userQuery, setUserQuery] = useState("");
+  const [packageQuery, setPackageQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [planFilter, setPlanFilter] = useState<Plan | "all">("all");
+  const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
+  const [deviceFilter, setDeviceFilter] = useState<DeviceFilter>("all");
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [packageFilter, setPackageFilter] = useState<Plan | "all">("all");
+  const [selectedLicenseKey, setSelectedLicenseKey] = useState("");
   const [busy, setBusy] = useState(false);
-  const [email, setEmail] = useState("iamramishka@gmail.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [form, setForm] = useState({
     name: "",
     userEmail: "",
     company: "",
+    plan: "pro" as Plan,
+    expiresAt: new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10)
+  });
+  const [bulkForm, setBulkForm] = useState({
+    count: 10,
     plan: "pro" as Plan,
     expiresAt: new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10)
   });
@@ -139,11 +175,12 @@ export default function AdminDashboard() {
     setMessage("");
     setBusy(true);
     try {
-      const body = await api<{ token: string }>("/api/auth/login", {
+      const body = await api<{ token: string; admin: { email: string; role: AdminRole } }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password })
       });
       setToken(body.token);
+      setAdmin(body.admin);
       window.localStorage.setItem(tokenStorageKey, body.token);
       setPassword("");
       setMessage("");
@@ -159,14 +196,16 @@ export default function AdminDashboard() {
     try {
       const [licenseBody, auditBody, userBody, analyticsBody] = await Promise.all([
         api<{ licenses: License[] }>("/api/licenses"),
-        api<{ audit_logs: AuditLog[] }>("/api/audit-logs?limit=12"),
+        api<{ audit_logs: AuditLog[] }>("/api/audit-logs?limit=100"),
         api<{ users: Customer[] }>("/api/users"),
         api<{ analytics: Analytics }>("/api/analytics")
       ]);
+      const packageBody = await api<{ packages: PackageDefinition[] }>("/api/packages");
       setLicenses(licenseBody.licenses ?? []);
       setAuditLogs(auditBody.audit_logs ?? []);
       setUsers(userBody.users ?? []);
       setAnalytics(analyticsBody.analytics ?? emptyAnalytics);
+      setPackages(packageBody.packages ?? []);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not load dashboard data");
     } finally {
@@ -201,6 +240,28 @@ export default function AdminDashboard() {
     }
   }
 
+  async function createBulkLicenses() {
+    setMessage("");
+    setBusy(true);
+    try {
+      const body = await api<{ licenses: License[] }>("/api/licenses/bulk", {
+        method: "POST",
+        body: JSON.stringify({
+          count: bulkForm.count,
+          plan: bulkForm.plan,
+          expiresAt: new Date(bulkForm.expiresAt).toISOString()
+        })
+      });
+      setMessage(`Created ${body.licenses.length} ${planLabels[bulkForm.plan]} licenses.`);
+      await loadDashboard();
+      setActiveTab("licenses");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create bulk licenses");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateLicense(license: License, patch: Partial<{ plan: Plan; expiresAt: string }>) {
     setMessage("");
     setBusy(true);
@@ -225,7 +286,28 @@ export default function AdminDashboard() {
     }
   }
 
-  async function licenseAction(path: string, key: string, success: string, extra = {}) {
+  async function updatePackage(definition: PackageDefinition, patch: PackageLimits) {
+    setMessage("");
+    setBusy(true);
+    try {
+      await api(`/api/packages/${definition.plan}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          videoLimit: patch.video_limit,
+          templateLimit: patch.template_limit,
+          workerLimit: patch.worker_limit
+        })
+      });
+      setMessage(`Updated ${planLabels[definition.plan]} limits.`);
+      await loadDashboard();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not update package limits");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function licenseAction(path: string, key: string, success: string, extra: Record<string, unknown> = {}, onDone?: () => void) {
     setMessage("");
     setBusy(true);
     try {
@@ -235,6 +317,7 @@ export default function AdminDashboard() {
       });
       setMessage(success);
       await loadDashboard();
+      onDone?.();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Action failed");
     } finally {
@@ -261,6 +344,7 @@ export default function AdminDashboard() {
 
   function logout(nextMessage = "") {
     setToken("");
+    setAdmin(null);
     setLicenses([]);
     setUsers([]);
     setAuditLogs([]);
@@ -271,7 +355,10 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const saved = window.localStorage.getItem(tokenStorageKey);
-    if (saved) setToken(saved);
+    if (saved) {
+      setToken(saved);
+      setAdmin(parseAdminFromToken(saved));
+    }
   }, []);
 
   useEffect(() => {
@@ -282,6 +369,10 @@ export default function AdminDashboard() {
     const needle = query.trim().toLowerCase();
     return licenses.filter((license) => {
       const matchesStatus = statusFilter === "all" || license.status === statusFilter;
+      const matchesPlan = planFilter === "all" || license.plan === planFilter;
+      const matchesExpiry = matchesExpiryWindow(license, expiryFilter);
+      const matchesDevice = deviceFilter === "all" || (deviceFilter === "bound" ? Boolean(license.device_id) : !license.device_id);
+      const matchesCompany = !companyFilter.trim() || (license.user?.company ?? "").toLowerCase().includes(companyFilter.trim().toLowerCase());
       const haystack = [
         license.license_key,
         license.plan,
@@ -292,14 +383,41 @@ export default function AdminDashboard() {
         license.user?.email ?? "",
         license.user?.company ?? ""
       ].join(" ").toLowerCase();
-      return matchesStatus && (!needle || haystack.includes(needle));
+      return matchesStatus && matchesPlan && matchesExpiry && matchesDevice && matchesCompany && (!needle || haystack.includes(needle));
     });
-  }, [licenses, query, statusFilter]);
+  }, [companyFilter, deviceFilter, expiryFilter, licenses, planFilter, query, statusFilter]);
 
   const filteredUsers = useMemo(() => {
     const needle = userQuery.trim().toLowerCase();
     return users.filter((user) => [user.name, user.email, user.company ?? ""].join(" ").toLowerCase().includes(needle));
   }, [userQuery, users]);
+
+  const filteredPackageLicenses = useMemo(() => {
+    const needle = packageQuery.trim().toLowerCase();
+    return licenses.filter((license) => {
+      const matchesPackage = packageFilter === "all" || license.plan === packageFilter;
+      const haystack = [
+        license.license_key,
+        planLabels[license.plan],
+        license.plan,
+        license.status,
+        license.device_id ?? "",
+        license.hostname ?? "",
+        license.user?.name ?? "",
+        license.user?.email ?? "",
+        license.user?.company ?? ""
+      ].join(" ").toLowerCase();
+      return matchesPackage && (!needle || haystack.includes(needle));
+    });
+  }, [licenses, packageFilter, packageQuery]);
+
+  const packageSummaries = useMemo(() => getPackageSummaries(licenses), [licenses]);
+  const expiringLicenses = useMemo(() => licenses
+    .filter((license) => license.status !== "revoked" && daysUntilNumber(license.expires_at) <= 30)
+    .sort((a, b) => new Date(a.expires_at).getTime() - new Date(b.expires_at).getTime()), [licenses]);
+  const selectedLicense = useMemo(() => licenses.find((license) => license.license_key === selectedLicenseKey) ?? null, [licenses, selectedLicenseKey]);
+  const selectedAuditLogs = useMemo(() => selectedLicense ? auditLogs.filter((entry) => entry.license_key === selectedLicense.license_key || entry.subject_id === selectedLicense.license_key) : [], [auditLogs, selectedLicense]);
+  const canWrite = admin?.role !== "read_only";
 
   if (!token) {
     return (
@@ -326,6 +444,7 @@ export default function AdminDashboard() {
         <NavButton tab="dashboard" activeTab={activeTab} onClick={setActiveTab} icon={<LayoutDashboard />} label="Dashboard" />
         <NavButton tab="licenses" activeTab={activeTab} onClick={setActiveTab} icon={<KeyRound />} label="Licenses" />
         <NavButton tab="users" activeTab={activeTab} onClick={setActiveTab} icon={<UsersRound />} label="Users" />
+        <NavButton tab="packages" activeTab={activeTab} onClick={setActiveTab} icon={<PackageCheck />} label="Packages" />
         <NavButton tab="analytics" activeTab={activeTab} onClick={setActiveTab} icon={<BarChart3 />} label="Analytics" />
         <NavButton tab="account" activeTab={activeTab} onClick={setActiveTab} icon={<LockKeyhole />} label="Account" />
       </aside>
@@ -336,6 +455,7 @@ export default function AdminDashboard() {
             <p>{pageSubtitle(activeTab)}</p>
           </div>
           <div className="header-actions">
+            <span className="role-pill">{admin ? `${admin.email} · ${formatRole(admin.role)}` : "Admin"}</span>
             <button onClick={loadDashboard} disabled={busy}><RefreshCcw /> {busy ? "Working..." : "Refresh"}</button>
             <button onClick={() => logout()}><LogOut /> Logout</button>
           </div>
@@ -346,37 +466,90 @@ export default function AdminDashboard() {
         {activeTab === "dashboard" && (
           <>
             <Stats analytics={analytics} />
-            <CreateLicensePanel form={form} setForm={setForm} busy={busy} onCreate={createLicense} />
+            <div className="service-grid">
+              <CreateLicensePanel form={form} setForm={setForm} busy={busy || !canWrite} onCreate={createLicense} />
+              <BulkLicensePanel form={bulkForm} setForm={setBulkForm} busy={busy || !canWrite} onCreate={createBulkLicenses} />
+            </div>
+            <ExpiringSoonPanel
+              licenses={expiringLicenses}
+              onRenew={(license, days) => licenseAction("/api/license/renew", license.license_key, `Extended ${license.license_key} by ${days} days.`, { days })}
+              onContact={openWhatsAppRenewal}
+              onExport={() => exportLicensesCsv("expiring-licenses", expiringLicenses)}
+              canWrite={canWrite}
+            />
             <ActivityPanel auditLogs={auditLogs} />
           </>
         )}
 
         {activeTab === "licenses" && (
+          <>
           <LicenseManagement
             licenses={filteredLicenses}
             query={query}
             statusFilter={statusFilter}
+            planFilter={planFilter}
+            expiryFilter={expiryFilter}
+            deviceFilter={deviceFilter}
+            companyFilter={companyFilter}
             busy={busy}
             setQuery={setQuery}
             setStatusFilter={setStatusFilter}
+            setPlanFilter={setPlanFilter}
+            setExpiryFilter={setExpiryFilter}
+            setDeviceFilter={setDeviceFilter}
+            setCompanyFilter={setCompanyFilter}
             onUpdate={updateLicense}
-            onExtend={(license) => licenseAction("/api/license/renew", license.license_key, `Extended ${license.license_key} by 30 days.`, { days: 30 })}
+            onExtend={(license, days) => licenseAction("/api/license/renew", license.license_key, `Extended ${license.license_key} by ${days} days.`, { days })}
             onReassign={(license) => {
               if (window.confirm(`Reassign ${license.license_key} to another PC? This removes the current device binding.`)) {
-                void licenseAction("/api/license/reset-device", license.license_key, `Device binding removed for ${license.license_key}.`);
+                const clearIfSelected = license.license_key === selectedLicenseKey ? () => setSelectedLicenseKey("") : undefined;
+                void licenseAction("/api/license/reset-device", license.license_key, `Device binding removed for ${license.license_key}.`, {}, clearIfSelected);
               }
             }}
             onRevoke={(license) => {
               if (window.confirm(`Revoke ${license.license_key}? The customer will lose access.`)) {
-                void licenseAction("/api/license/revoke", license.license_key, `Revoked ${license.license_key}.`);
+                const clearIfSelected = license.license_key === selectedLicenseKey ? () => setSelectedLicenseKey("") : undefined;
+                void licenseAction("/api/license/revoke", license.license_key, `Revoked ${license.license_key}.`, {}, clearIfSelected);
               }
             }}
+            onSelect={(license) => setSelectedLicenseKey(license.license_key)}
             onCopied={(key) => setMessage(`Copied ${key}.`)}
+            onExport={() => exportLicensesCsv("licenses", filteredLicenses)}
+            canWrite={canWrite}
           />
+          {selectedLicense && (
+            <LicenseDetailPanel
+              license={selectedLicense}
+              auditLogs={selectedAuditLogs}
+              canWrite={canWrite}
+              onClose={() => setSelectedLicenseKey("")}
+              onRenew={(days) => licenseAction("/api/license/renew", selectedLicense.license_key, `Extended ${selectedLicense.license_key} by ${days} days.`, { days })}
+              onReset={() => licenseAction("/api/license/reset-device", selectedLicense.license_key, `Device binding removed for ${selectedLicense.license_key}.`, {}, () => setSelectedLicenseKey(""))}
+              onRevoke={() => licenseAction("/api/license/revoke", selectedLicense.license_key, `Revoked ${selectedLicense.license_key}.`, {}, () => setSelectedLicenseKey(""))}
+              onContact={() => openWhatsAppRenewal(selectedLicense)}
+            />
+          )}
+          </>
         )}
 
         {activeTab === "users" && (
-          <UsersPage users={filteredUsers} query={userQuery} setQuery={setUserQuery} />
+          <UsersPage users={filteredUsers} query={userQuery} setQuery={setUserQuery} onExport={() => exportUsersCsv("customers", filteredUsers)} />
+        )}
+
+        {activeTab === "packages" && (
+          <PackagesPage
+            licenses={filteredPackageLicenses}
+            packages={packages}
+            summaries={packageSummaries}
+            query={packageQuery}
+            packageFilter={packageFilter}
+            busy={busy}
+            setQuery={setPackageQuery}
+            setPackageFilter={setPackageFilter}
+            onUpdatePackage={updatePackage}
+            onUpdate={updateLicense}
+            canWrite={canWrite}
+          />
         )}
 
         {activeTab === "analytics" && (
@@ -433,30 +606,115 @@ function CreateLicensePanel({ form, setForm, busy, onCreate }: {
   );
 }
 
+function BulkLicensePanel({ form, setForm, busy, onCreate }: {
+  form: { count: number; plan: Plan; expiresAt: string };
+  setForm: Dispatch<SetStateAction<{ count: number; plan: Plan; expiresAt: string }>>;
+  busy: boolean;
+  onCreate: () => void;
+}) {
+  return (
+    <section className="create-panel">
+      <h2>Bulk License Generation</h2>
+      <div className="create-grid bulk-grid">
+        <select value={form.count} onChange={(event) => setForm({ ...form, count: Number(event.target.value) })}>
+          <option value={10}>10 licenses</option>
+          <option value={50}>50 licenses</option>
+          <option value={100}>100 licenses</option>
+        </select>
+        <select value={form.plan} onChange={(event) => setForm({ ...form, plan: event.target.value as Plan })}>
+          {Object.entries(planLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <input type="date" value={form.expiresAt} onChange={(event) => setForm({ ...form, expiresAt: event.target.value })} />
+        <button className="primary" onClick={onCreate} disabled={busy || !form.expiresAt}><Plus /> Generate</button>
+      </div>
+    </section>
+  );
+}
+
+function ExpiringSoonPanel({ licenses, onRenew, onContact, onExport, canWrite }: {
+  licenses: License[];
+  onRenew: (license: License, days: number) => void;
+  onContact: (license: License) => void;
+  onExport: () => void;
+  canWrite: boolean;
+}) {
+  return (
+    <section className="table-panel">
+      <div className="table-title">
+        <h2>Expiring Soon</h2>
+        <button onClick={onExport}><Download /> Export CSV</button>
+      </div>
+      <div className="expiry-grid">
+        {(["1", "7", "14", "30"] as const).map((window) => (
+          <div key={window}>
+            <strong>{licenses.filter((license) => daysUntilNumber(license.expires_at) <= Number(window)).length}</strong>
+            <span>{window} days</span>
+          </div>
+        ))}
+      </div>
+      <div className="compact-list">
+        {licenses.slice(0, 8).map((license) => (
+          <div className="compact-row" key={license.license_key}>
+            <span>
+              <strong>{license.user?.name ?? "Unassigned"}</strong>
+              <small>{license.license_key} · {daysUntil(license.expires_at)}</small>
+            </span>
+            <button onClick={() => onContact(license)}><MessageCircle /> Contact</button>
+            <button onClick={() => onRenew(license, 30)} disabled={!canWrite || license.status === "revoked"}><CalendarPlus /> 30d</button>
+          </div>
+        ))}
+      </div>
+      {licenses.length === 0 && <div className="empty-state">No licenses are expiring in the next 30 days.</div>}
+    </section>
+  );
+}
+
 function LicenseManagement({
   licenses,
   query,
   statusFilter,
+  planFilter,
+  expiryFilter,
+  deviceFilter,
+  companyFilter,
   busy,
   setQuery,
   setStatusFilter,
+  setPlanFilter,
+  setExpiryFilter,
+  setDeviceFilter,
+  setCompanyFilter,
   onUpdate,
   onExtend,
   onReassign,
   onRevoke,
-  onCopied
+  onSelect,
+  onCopied,
+  onExport,
+  canWrite
 }: {
   licenses: License[];
   query: string;
   statusFilter: string;
+  planFilter: Plan | "all";
+  expiryFilter: ExpiryFilter;
+  deviceFilter: DeviceFilter;
+  companyFilter: string;
   busy: boolean;
   setQuery: (value: string) => void;
   setStatusFilter: (value: string) => void;
+  setPlanFilter: (value: Plan | "all") => void;
+  setExpiryFilter: (value: ExpiryFilter) => void;
+  setDeviceFilter: (value: DeviceFilter) => void;
+  setCompanyFilter: (value: string) => void;
   onUpdate: (license: License, patch: Partial<{ plan: Plan; expiresAt: string }>) => void;
-  onExtend: (license: License) => void;
+  onExtend: (license: License, days: number) => void;
   onReassign: (license: License) => void;
   onRevoke: (license: License) => void;
+  onSelect: (license: License) => void;
   onCopied: (key: string) => void;
+  onExport: () => void;
+  canWrite: boolean;
 }) {
   return (
     <section className="table-panel">
@@ -474,6 +732,25 @@ function LicenseManagement({
             <option value="expired">Expired</option>
             <option value="revoked">Revoked</option>
           </select>
+          <select value={planFilter} onChange={(event) => setPlanFilter(event.target.value as Plan | "all")}>
+            <option value="all">All Plans</option>
+            {Object.entries(planLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          <select value={expiryFilter} onChange={(event) => setExpiryFilter(event.target.value as ExpiryFilter)}>
+            <option value="all">Any Expiry</option>
+            <option value="1">1 Day</option>
+            <option value="7">7 Days</option>
+            <option value="14">14 Days</option>
+            <option value="30">30 Days</option>
+            <option value="expired">Expired</option>
+          </select>
+          <select value={deviceFilter} onChange={(event) => setDeviceFilter(event.target.value as DeviceFilter)}>
+            <option value="all">Any Device</option>
+            <option value="bound">Device Bound</option>
+            <option value="unbound">Unbound</option>
+          </select>
+          <input className="company-filter" placeholder="Company" value={companyFilter} onChange={(event) => setCompanyFilter(event.target.value)} />
+          <button onClick={onExport}><Download /> Export</button>
         </div>
       </div>
       <div className="license-table">
@@ -492,7 +769,9 @@ function LicenseManagement({
             onExtend={onExtend}
             onReassign={onReassign}
             onRevoke={onRevoke}
+            onSelect={onSelect}
             onCopied={onCopied}
+            canWrite={canWrite}
           />
         ))}
       </div>
@@ -501,19 +780,21 @@ function LicenseManagement({
   );
 }
 
-function LicenseRow({ license, busy, onUpdate, onExtend, onReassign, onRevoke, onCopied }: {
+function LicenseRow({ license, busy, onUpdate, onExtend, onReassign, onRevoke, onSelect, onCopied, canWrite }: {
   license: License;
   busy: boolean;
   onUpdate: (license: License, patch: Partial<{ plan: Plan; expiresAt: string }>) => void;
-  onExtend: (license: License) => void;
+  onExtend: (license: License, days: number) => void;
   onReassign: (license: License) => void;
   onRevoke: (license: License) => void;
+  onSelect: (license: License) => void;
   onCopied: (key: string) => void;
+  canWrite: boolean;
 }) {
   const [plan, setPlan] = useState<Plan>(license.plan);
   const [expiresAt, setExpiresAt] = useState(dateInputValue(license.expires_at));
   const changed = plan !== license.plan || expiresAt !== dateInputValue(license.expires_at);
-  const disabled = busy || license.status === "revoked";
+  const disabled = busy || !canWrite || license.status === "revoked";
 
   useEffect(() => {
     setPlan(license.plan);
@@ -544,8 +825,9 @@ function LicenseRow({ license, busy, onUpdate, onExtend, onReassign, onRevoke, o
       </div>
       <div className="actions">
         <button title="Copy license key" onClick={() => navigator.clipboard.writeText(license.license_key).then(() => onCopied(license.license_key))}><Copy /></button>
+        <button title="Open license detail" onClick={() => onSelect(license)}><Eye /></button>
         <button title="Save plan or expiry changes" onClick={() => onUpdate(license, { plan, expiresAt })} disabled={!changed || disabled}><Save /></button>
-        <button title="Extend expiry by 30 days" onClick={() => onExtend(license)} disabled={disabled}><CalendarPlus /></button>
+        <button title="Extend expiry by 30 days" onClick={() => onExtend(license, 30)} disabled={disabled}><CalendarPlus /></button>
         <button title="Reassign device to another PC" onClick={() => onReassign(license)} disabled={disabled}><RotateCcw /></button>
         <button title="Revoke customer access" onClick={() => onRevoke(license)} disabled={license.status === "revoked"}><Ban /></button>
       </div>
@@ -553,12 +835,15 @@ function LicenseRow({ license, busy, onUpdate, onExtend, onReassign, onRevoke, o
   );
 }
 
-function UsersPage({ users, query, setQuery }: { users: Customer[]; query: string; setQuery: (value: string) => void }) {
+function UsersPage({ users, query, setQuery, onExport }: { users: Customer[]; query: string; setQuery: (value: string) => void; onExport: () => void }) {
   return (
     <section className="table-panel">
       <div className="table-title">
         <h2>Customers</h2>
-        <label className="search-box"><Search /><input placeholder="Search customers" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+        <div className="table-tools">
+          <label className="search-box"><Search /><input placeholder="Search customers" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+          <button onClick={onExport}><Download /> Export</button>
+        </div>
       </div>
       <div className="user-table">
         <div className="table-head">Customer</div>
@@ -573,6 +858,53 @@ function UsersPage({ users, query, setQuery }: { users: Customer[]; query: strin
       {users.length === 0 && <div className="empty-state">No customers found.</div>}
     </section>
   );
+}
+
+function LicenseDetailPanel({ license, auditLogs, canWrite, onClose, onRenew, onReset, onRevoke, onContact }: {
+  license: License;
+  auditLogs: AuditLog[];
+  canWrite: boolean;
+  onClose: () => void;
+  onRenew: (days: number) => void;
+  onReset: () => void;
+  onRevoke: () => void;
+  onContact: () => void;
+}) {
+  const [customDays, setCustomDays] = useState(30);
+  return (
+    <section className="detail-panel">
+      <div className="table-title">
+        <h2>License Detail</h2>
+        <button onClick={onClose}>Close</button>
+      </div>
+      <div className="detail-grid">
+        <InfoBlock label="Key" value={license.license_key} />
+        <InfoBlock label="Customer" value={`${license.user?.name ?? "Unassigned"} · ${license.user?.email ?? "No email"}`} />
+        <InfoBlock label="Company" value={license.user?.company ?? "No company"} />
+        <InfoBlock label="Plan" value={planLabels[license.plan]} />
+        <InfoBlock label="Status" value={license.status} />
+        <InfoBlock label="Expiry" value={`${new Date(license.expires_at).toLocaleDateString()} · ${daysUntil(license.expires_at)}`} />
+        <InfoBlock label="Device" value={license.device_id ? `${license.device_id} · ${license.hostname ?? "No hostname"}` : "Not bound"} />
+        <InfoBlock label="Last Verified" value={license.last_verified ? new Date(license.last_verified).toLocaleString() : "Never"} />
+      </div>
+      <div className="detail-actions">
+        <button onClick={onContact}><MessageCircle /> Contact</button>
+        {[30, 90, 365].map((days) => <button key={days} onClick={() => onRenew(days)} disabled={!canWrite || license.status === "revoked"}><CalendarPlus /> {days}d</button>)}
+        <input type="number" min={1} max={3660} value={customDays} onChange={(event) => setCustomDays(Number(event.target.value))} />
+        <button onClick={() => onRenew(customDays)} disabled={!canWrite || customDays < 1 || license.status === "revoked"}><CalendarPlus /> Custom</button>
+        <button onClick={onReset} disabled={!canWrite || license.status === "revoked"}><RotateCcw /> Reset Device</button>
+        <button onClick={onRevoke} disabled={!canWrite || license.status === "revoked"}><Ban /> Revoke</button>
+      </div>
+      <div className="activity-list">
+        {auditLogs.map((entry) => <ActivityRow key={entry.id} entry={entry} />)}
+      </div>
+      {auditLogs.length === 0 && <div className="empty-state">No activity found for this license.</div>}
+    </section>
+  );
+}
+
+function InfoBlock({ label, value }: { label: string; value: string }) {
+  return <div className="info-block"><span>{label}</span><strong>{value}</strong></div>;
 }
 
 function CustomerRow({ user }: { user: Customer }) {
@@ -615,6 +947,186 @@ function AnalyticsPage({ analytics }: { analytics: Analytics }) {
   );
 }
 
+function PackagesPage({
+  licenses,
+  packages,
+  summaries,
+  query,
+  packageFilter,
+  busy,
+  setQuery,
+  setPackageFilter,
+  onUpdatePackage,
+  onUpdate,
+  canWrite
+}: {
+  licenses: License[];
+  packages: PackageDefinition[];
+  summaries: Record<Plan, PackageSummary>;
+  query: string;
+  packageFilter: Plan | "all";
+  busy: boolean;
+  setQuery: (value: string) => void;
+  setPackageFilter: (value: Plan | "all") => void;
+  onUpdatePackage: (definition: PackageDefinition, patch: PackageLimits) => void;
+  onUpdate: (license: License, patch: Partial<{ plan: Plan; expiresAt: string }>) => void;
+  canWrite: boolean;
+}) {
+  return (
+    <>
+      <div className="package-stats">
+        {(Object.keys(planLabels) as Plan[]).map((plan) => (
+          <PackageCard key={plan} plan={plan} summary={summaries[plan]} />
+        ))}
+      </div>
+      <section className="table-panel">
+        <div className="table-title">
+          <h2>Package Limits</h2>
+        </div>
+        <div className="package-limit-grid">
+          {packages.map((definition) => (
+            <PackageLimitCard key={definition.plan} definition={definition} busy={busy || !canWrite} onSave={onUpdatePackage} />
+          ))}
+        </div>
+        {packages.length === 0 && <div className="empty-state">Package limits could not be loaded.</div>}
+      </section>
+      <section className="table-panel">
+        <div className="table-title">
+          <h2>Package Allocation</h2>
+          <div className="table-tools">
+            <label className="search-box">
+              <Search />
+              <input placeholder="Search packages" value={query} onChange={(event) => setQuery(event.target.value)} />
+            </label>
+            <select value={packageFilter} onChange={(event) => setPackageFilter(event.target.value as Plan | "all")}>
+              <option value="all">All Packages</option>
+              {Object.entries(planLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="package-table">
+          <div className="table-head">License</div>
+          <div className="table-head">Customer</div>
+          <div className="table-head">Current Package</div>
+          <div className="table-head">Allocate Package</div>
+          <div className="table-head">Status</div>
+          <div className="table-head">Expiry</div>
+          <div className="table-head">Device</div>
+          {licenses.map((license) => (
+            <PackageAllocationRow key={license.license_key} license={license} busy={busy || !canWrite} onUpdate={onUpdate} />
+          ))}
+        </div>
+        {licenses.length === 0 && <div className="empty-state">No licenses match the package filters.</div>}
+      </section>
+    </>
+  );
+}
+
+function PackageLimitCard({ definition, busy, onSave }: {
+  definition: PackageDefinition;
+  busy: boolean;
+  onSave: (definition: PackageDefinition, patch: PackageLimits) => void;
+}) {
+  const [limits, setLimits] = useState<PackageLimits>({
+    video_limit: definition.video_limit,
+    template_limit: definition.template_limit,
+    worker_limit: definition.worker_limit
+  });
+  const changed =
+    limits.video_limit !== definition.video_limit ||
+    limits.template_limit !== definition.template_limit ||
+    limits.worker_limit !== definition.worker_limit;
+  const invalid = limits.video_limit < 1 || limits.template_limit < 1 || limits.worker_limit < 1;
+
+  useEffect(() => {
+    setLimits({
+      video_limit: definition.video_limit,
+      template_limit: definition.template_limit,
+      worker_limit: definition.worker_limit
+    });
+  }, [definition.plan, definition.video_limit, definition.template_limit, definition.worker_limit]);
+
+  return (
+    <div className="package-limit-card">
+      <div className="package-limit-title">
+        <h3>{planLabels[definition.plan]}</h3>
+        <small>Updated {new Date(definition.updated_at).toLocaleDateString()}</small>
+      </div>
+      <label>
+        <span>Video limit</span>
+        <input type="number" min={1} value={limits.video_limit} onChange={(event) => setLimits({ ...limits, video_limit: Number(event.target.value) })} />
+      </label>
+      <label>
+        <span>Template limit</span>
+        <input type="number" min={1} value={limits.template_limit} onChange={(event) => setLimits({ ...limits, template_limit: Number(event.target.value) })} />
+      </label>
+      <label>
+        <span>Worker limit</span>
+        <input type="number" min={1} value={limits.worker_limit} onChange={(event) => setLimits({ ...limits, worker_limit: Number(event.target.value) })} />
+      </label>
+      <button className="primary" onClick={() => onSave(definition, limits)} disabled={busy || !changed || invalid}><Save /> Save Limits</button>
+    </div>
+  );
+}
+
+function PackageCard({ plan, summary }: { plan: Plan; summary: PackageSummary }) {
+  return (
+    <div className="package-card">
+      <div>
+        <span>{planLabels[plan]}</span>
+        <strong>{summary.total}</strong>
+      </div>
+      <div className="package-mix">
+        <span>Active {summary.active}</span>
+        <span>Pending {summary.pending}</span>
+        <span>Expired {summary.expired}</span>
+        <span>Revoked {summary.revoked}</span>
+      </div>
+    </div>
+  );
+}
+
+function PackageAllocationRow({ license, busy, onUpdate }: {
+  license: License;
+  busy: boolean;
+  onUpdate: (license: License, patch: Partial<{ plan: Plan; expiresAt: string }>) => void;
+}) {
+  const [plan, setPlan] = useState<Plan>(license.plan);
+  const changed = plan !== license.plan;
+  const disabled = busy || license.status === "revoked";
+
+  useEffect(() => {
+    setPlan(license.plan);
+  }, [license.license_key, license.plan]);
+
+  return (
+    <>
+      <div className="mono">{license.license_key}</div>
+      <div>
+        <strong>{license.user?.name ?? "Unassigned"}</strong>
+        <small>{license.user?.email ?? "No customer email"}</small>
+        {license.user?.company && <small>{license.user.company}</small>}
+      </div>
+      <div><strong>{planLabels[license.plan]}</strong></div>
+      <div className="package-editor">
+        <select value={plan} onChange={(event) => setPlan(event.target.value as Plan)} disabled={disabled}>
+          {Object.entries(planLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <button title="Save package allocation" onClick={() => onUpdate(license, { plan })} disabled={!changed || disabled}><Save /></button>
+      </div>
+      <div><span className={`pill ${license.status}`}>{license.status}</span></div>
+      <div>
+        <strong>{new Date(license.expires_at).toLocaleDateString()}</strong>
+        <small>{daysUntil(license.expires_at)}</small>
+      </div>
+      <div className="mono">
+        {license.device_id ? `${license.device_id.slice(0, 12)}...` : "Not bound"}
+        {license.hostname && <small>{license.hostname}</small>}
+      </div>
+    </>
+  );
+}
+
 function AccountPage({ form, setForm, busy, onChangePassword }: {
   form: { currentPassword: string; newPassword: string; confirmPassword: string };
   setForm: Dispatch<SetStateAction<{ currentPassword: string; newPassword: string; confirmPassword: string }>>;
@@ -636,13 +1148,46 @@ function AccountPage({ form, setForm, busy, onChangePassword }: {
 }
 
 function ActivityPanel({ auditLogs }: { auditLogs: AuditLog[] }) {
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(auditLogs.length / activityPageSize));
+  const visibleAuditLogs = auditLogs.slice((page - 1) * activityPageSize, page * activityPageSize);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
+
   return (
     <section className="activity-panel">
       <div className="panel-heading"><h2>Recent Activity</h2></div>
-      <div className="activity-list">
-        {auditLogs.map((entry) => <ActivityRow key={entry.id} entry={entry} />)}
-      </div>
+      {visibleAuditLogs.length > 0 && (
+        <div className="activity-list">
+          {visibleAuditLogs.map((entry) => <ActivityRow key={entry.id} entry={entry} />)}
+        </div>
+      )}
       {auditLogs.length === 0 && <div className="empty-state">No activity recorded yet.</div>}
+      {auditLogs.length > activityPageSize && (
+        <div className="activity-pagination">
+          <span>Page {page} of {pageCount}</span>
+          <div>
+            <button
+              type="button"
+              aria-label="Previous activity page"
+              disabled={page === 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              <ChevronLeft />
+            </button>
+            <button
+              type="button"
+              aria-label="Next activity page"
+              disabled={page === pageCount}
+              onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+            >
+              <ChevronRight />
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -671,8 +1216,29 @@ function Metric({ label, value, icon }: { label: string; value: number; icon: Re
   return <div className="metric-card">{icon}<strong>{value}</strong><span>{label}</span></div>;
 }
 
+interface PackageSummary {
+  total: number;
+  active: number;
+  pending: number;
+  expired: number;
+  revoked: number;
+}
+
+function getPackageSummaries(licenses: License[]) {
+  const summaries: Record<Plan, PackageSummary> = {
+    starter: { total: 0, active: 0, pending: 0, expired: 0, revoked: 0 },
+    pro: { total: 0, active: 0, pending: 0, expired: 0, revoked: 0 },
+    enterprise: { total: 0, active: 0, pending: 0, expired: 0, revoked: 0 }
+  };
+  for (const license of licenses) {
+    summaries[license.plan].total += 1;
+    summaries[license.plan][license.status] += 1;
+  }
+  return summaries;
+}
+
 function pageTitle(tab: Tab) {
-  return ({ dashboard: "Admin Dashboard", licenses: "Licenses", users: "Users", analytics: "Analytics", account: "Account" } satisfies Record<Tab, string>)[tab];
+  return ({ dashboard: "Admin Dashboard", licenses: "Licenses", users: "Users", analytics: "Analytics", packages: "Packages", account: "Account" } satisfies Record<Tab, string>)[tab];
 }
 
 function pageSubtitle(tab: Tab) {
@@ -680,6 +1246,7 @@ function pageSubtitle(tab: Tab) {
     dashboard: "Create licenses and review recent activity.",
     licenses: "Manage plans, expiry, device bindings, and revocations.",
     users: "Customer accounts grouped from license records.",
+    packages: "Manually allocate Starter, Pro, or Enterprise to licenses.",
     analytics: "License, activation, and plan performance.",
     account: "Update admin sign-in security."
   } satisfies Record<Tab, string>)[tab];
@@ -687,6 +1254,84 @@ function pageSubtitle(tab: Tab) {
 
 function formatActivityAction(action: string) {
   return action.replace("license.", "").replace(/_/g, " ");
+}
+
+function formatRole(role: AdminRole) {
+  return role.replace("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function parseAdminFromToken(token: string): { email: string; role: AdminRole } | null {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1] ?? "")) as { email?: string; role?: AdminRole };
+    if (!payload.email || !payload.role) return null;
+    return { email: payload.email, role: payload.role };
+  } catch {
+    return null;
+  }
+}
+
+function matchesExpiryWindow(license: License, filter: ExpiryFilter) {
+  if (filter === "all") return true;
+  const days = daysUntilNumber(license.expires_at);
+  if (filter === "expired") return days < 0;
+  return days >= 0 && days <= Number(filter);
+}
+
+function daysUntilNumber(value: string) {
+  return Math.ceil((new Date(value).getTime() - Date.now()) / 86_400_000);
+}
+
+function openWhatsAppRenewal(license: License) {
+  const customer = license.user?.name ?? "customer";
+  const text = encodeURIComponent(`Hi ${customer}, your Video Reposter license ${license.license_key} ${daysUntil(license.expires_at)}. Please contact us to renew.`);
+  window.open(`https://wa.me/?text=${text}`, "_blank", "noopener,noreferrer");
+}
+
+function exportLicensesCsv(name: string, rows: License[]) {
+  downloadCsv(name, [
+    ["license_key", "customer_name", "customer_email", "company", "plan", "status", "expires_at", "device_id", "hostname", "os", "activated_at", "last_verified"],
+    ...rows.map((license) => [
+      license.license_key,
+      license.user?.name ?? "",
+      license.user?.email ?? "",
+      license.user?.company ?? "",
+      planLabels[license.plan],
+      license.status,
+      license.expires_at,
+      license.device_id ?? "",
+      license.hostname ?? "",
+      license.os ?? "",
+      license.activated_at ?? "",
+      license.last_verified ?? ""
+    ])
+  ]);
+}
+
+function exportUsersCsv(name: string, rows: Customer[]) {
+  downloadCsv(name, [
+    ["name", "email", "company", "license_count", "active_count", "pending_count", "expired_count", "revoked_count", "latest_activation"],
+    ...rows.map((user) => [
+      user.name,
+      user.email,
+      user.company ?? "",
+      user.license_count,
+      user.active_count,
+      user.pending_count,
+      user.expired_count,
+      user.revoked_count,
+      user.latest_activation ?? ""
+    ])
+  ]);
+}
+
+function downloadCsv(name: string, rows: Array<Array<string | number>>) {
+  const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function dateInputValue(value: string) {

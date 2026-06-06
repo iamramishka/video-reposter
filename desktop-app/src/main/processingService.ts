@@ -6,6 +6,8 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { buildFfmpegArgs, parseFfmpegProgress } from "../shared/processing.js";
 import type { FfmpegJob } from "../shared/processing.js";
+import { classifyProcessingFailure, componentUnavailableFailure, processingFailedFailure } from "../shared/processingFailure.js";
+import type { ProcessingAvailability, ProcessingFailure } from "../shared/processingFailure.js";
 
 const require = createRequire(import.meta.url);
 const ffmpegStatic = require("ffmpeg-static") as string | null;
@@ -19,6 +21,7 @@ export type ProcessingUpdate = {
   progress: number;
   currentSeconds?: number;
   message?: string;
+  failure?: ProcessingFailure;
 };
 
 export type ProcessingJobRequest = FfmpegJob & {
@@ -59,12 +62,31 @@ export class ProcessingService {
     const child = this.processFactory(this.tools.ffmpeg, args);
     this.processes.set(id, child);
 
+    // Keep a rolling buffer of the most recent stderr lines so a failed job can
+    // report *why* FFmpeg failed instead of just an exit code.
+    const stderrTail: string[] = [];
+    // Guard so only the first of the "error"/"close" events emits a terminal
+    // update. Without this, a spawn failure can fire both and produce
+    // contradictory "failed" updates for the same job.
+    let settled = false;
+    const settle = (update: ProcessingUpdate) => {
+      if (settled) return;
+      settled = true;
+      this.processes.delete(id);
+      this.onUpdate(update);
+    };
+
     this.onUpdate({ id, status: "processing", progress: 0, message: "FFmpeg started." });
 
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
       const lines = chunk.split(/\r?\n/);
       for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) {
+          stderrTail.push(trimmed);
+          if (stderrTail.length > 12) stderrTail.shift();
+        }
         const parsed = request.durationSeconds ? parseFfmpegProgress(line, request.durationSeconds) : null;
         if (parsed) {
           this.onUpdate({ id, status: "processing", progress: parsed.progress, currentSeconds: parsed.currentSeconds });
@@ -73,21 +95,22 @@ export class ProcessingService {
     });
 
     child.on("error", (error) => {
-      this.processes.delete(id);
-      this.onUpdate({ id, status: "failed", progress: 0, message: error.message });
+      const failure = classifyProcessingFailure(error.message);
+      settle({ id, status: "failed", progress: 0, message: failure.message, failure });
     });
 
     child.on("close", (code, signal) => {
-      this.processes.delete(id);
-      if (signal === "SIGTERM") {
-        this.onUpdate({ id, status: "stopped", progress: 0, message: "Processing stopped." });
+      if (signal === "SIGTERM" || signal === "SIGKILL") {
+        settle({ id, status: "stopped", progress: 0, message: "Processing stopped." });
         return;
       }
       if (code === 0) {
-        this.onUpdate({ id, status: "complete", progress: 100, message: "Processing complete." });
+        settle({ id, status: "complete", progress: 100, message: "Processing complete." });
         return;
       }
-      this.onUpdate({ id, status: "failed", progress: 0, message: `FFmpeg exited with code ${code ?? "unknown"}.` });
+      const reason = stderrTail.length ? ` ${stderrTail.slice(-3).join(" ")}` : "";
+      const failure = processingFailedFailure(`FFmpeg exited with code ${code ?? "unknown"}.${reason}`.trim());
+      settle({ id, status: "failed", progress: 0, message: failure.message, failure });
     });
 
     return { id, args };
@@ -100,27 +123,44 @@ export class ProcessingService {
     return true;
   }
 
+  /**
+   * Terminate every running FFmpeg process. Called on app quit so we never
+   * leave orphaned encoders consuming CPU after the window closes.
+   */
+  stopAll() {
+    for (const child of this.processes.values()) child.kill("SIGTERM");
+    this.processes.clear();
+  }
+
   async checkFfmpeg() {
-    return new Promise<{ available: boolean; message: string }>((resolve) => {
+    return new Promise<ProcessingAvailability>((resolve) => {
       const child = this.processFactory(this.tools.ffmpeg, ["-version"]);
       let output = "";
+      let settled = false;
+      const settle = (result: ProcessingAvailability) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
 
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
         output += chunk;
       });
 
-      child.on("error", () => {
-        resolve({ available: false, message: "FFmpeg was not found on PATH." });
+      child.on("error", (error) => {
+        const failure = componentUnavailableFailure(error.message);
+        settle({ available: false, message: failure.message, technicalMessage: failure.technicalMessage, failure });
       });
 
       child.on("close", (code) => {
         if (code === 0) {
           const versionLine = output.split(/\r?\n/)[0] || "FFmpeg is available.";
-          resolve({ available: true, message: versionLine });
+          settle({ available: true, message: "Video processing is ready.", technicalMessage: versionLine });
           return;
         }
-        resolve({ available: false, message: `FFmpeg check failed with code ${code ?? "unknown"}.` });
+        const failure = componentUnavailableFailure(`FFmpeg check failed with code ${code ?? "unknown"}.`);
+        settle({ available: false, message: failure.message, technicalMessage: failure.technicalMessage, failure });
       });
     });
   }

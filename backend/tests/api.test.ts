@@ -5,15 +5,18 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { config } from "../src/config.js";
 import { LicenseService } from "../src/services/licenseService.js";
+import { PackageService } from "../src/services/packageService.js";
 import { addDays } from "../src/utils/dates.js";
 import { MemoryAuditRepository } from "./memoryAuditRepository.js";
 import { MemoryAuthRepository } from "./memoryAuthRepository.js";
 import { MemoryLicenseRepository } from "./memoryLicenseRepository.js";
+import { MemoryPackageRepository } from "./memoryPackageRepository.js";
 
 describe("license API", () => {
   it("creates and activates a license", async () => {
-    const service = new LicenseService(new MemoryLicenseRepository());
-    const app = createApp({ licenseService: service, requireAdminAuth: false });
+    const packageRepository = new MemoryPackageRepository();
+    const service = new LicenseService(new MemoryLicenseRepository(), undefined, packageRepository);
+    const app = createApp({ licenseService: service, packageRepository, requireAdminAuth: false });
 
     const created = await request(app)
       .post("/api/licenses")
@@ -29,6 +32,7 @@ describe("license API", () => {
 
     expect(activated.body.valid).toBe(true);
     expect(activated.body.status).toBe("active");
+    expect(activated.body.package_limits).toEqual({ video_limit: 50, template_limit: 5, worker_limit: 2 });
   });
 
   it("returns conflict for device mismatch", async () => {
@@ -118,6 +122,37 @@ describe("license API", () => {
       plan: "enterprise",
       user: expect.objectContaining({ company: "Enterprise Studio" })
     }));
+  });
+
+  it("bulk-generates licenses for admin operations", async () => {
+    const service = new LicenseService(new MemoryLicenseRepository());
+    const app = createApp({ licenseService: service });
+    const token = jwt.sign({ sub: "admin-1", email: "admin@videoreposter.local", role: "admin" }, config.jwtSecret);
+
+    const response = await request(app)
+      .post("/api/licenses/bulk")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ count: 10, plan: "starter", expiresAt: addDays(new Date(), 30).toISOString() })
+      .expect(201);
+
+    expect(response.body.licenses).toHaveLength(10);
+    expect(response.body.licenses[0]).toEqual(expect.objectContaining({ plan: "starter", status: "pending" }));
+  });
+
+  it("allows read-only admins to view records but blocks writes", async () => {
+    const service = new LicenseService(new MemoryLicenseRepository());
+    const app = createApp({ licenseService: service });
+    const token = jwt.sign({ sub: "admin-1", email: "readonly@videoreposter.local", role: "read_only" }, config.jwtSecret);
+
+    await request(app).get("/api/licenses").set("Authorization", `Bearer ${token}`).expect(200);
+    await request(app)
+      .post("/api/licenses")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ expiresAt: addDays(new Date(), 30).toISOString() })
+      .expect(403)
+      .expect(({ body }) => {
+        expect(body.code).toBe("AUTH_READ_ONLY");
+      });
   });
 
   it("reports expired licenses as expired in admin list responses", async () => {
@@ -235,6 +270,50 @@ describe("license API", () => {
     }));
   });
 
+  it("returns and updates package limits with audit logs", async () => {
+    const auditRepository = new MemoryAuditRepository();
+    const packageRepository = new MemoryPackageRepository();
+    const packageService = new PackageService(packageRepository, auditRepository);
+    const licenseService = new LicenseService(new MemoryLicenseRepository(), auditRepository, packageRepository);
+    const app = createApp({ licenseService, packageRepository, packageService, auditRepository });
+    const token = jwt.sign({ sub: "admin-1", email: "admin@videoreposter.local", role: "admin" }, config.jwtSecret);
+
+    const defaults = await request(app).get("/api/packages").set("Authorization", `Bearer ${token}`).expect(200);
+    expect(defaults.body.packages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ plan: "starter", video_limit: 5, template_limit: 2, worker_limit: 1 }),
+      expect.objectContaining({ plan: "pro", video_limit: 50, template_limit: 5, worker_limit: 2 })
+    ]));
+
+    await request(app)
+      .patch("/api/packages/starter")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ videoLimit: 7, templateLimit: 3, workerLimit: 2 })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.package).toEqual(expect.objectContaining({
+          plan: "starter",
+          video_limit: 7,
+          template_limit: 3,
+          worker_limit: 2
+        }));
+      });
+
+    await licenseService.createLicense({ key: "VDRP-PACK-LIMI-TS00-0001", plan: "starter", expiresAt: addDays(new Date(), 30).toISOString() });
+    const activated = await request(app)
+      .post("/api/license/activate")
+      .send({ key: "VDRP-PACK-LIMI-TS00-0001", device_id: "device-package-0001" })
+      .expect(200);
+
+    expect(activated.body.package_limits).toEqual({ video_limit: 7, template_limit: 3, worker_limit: 2 });
+    expect(auditRepository.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        action: "package.updated",
+        subjectType: "admin",
+        subjectId: "starter"
+      })
+    ]));
+  });
+
   it("changes admin passwords after verifying the current password", async () => {
     const passwordHash = await bcrypt.hash("old-password-123", 12);
     const authRepository = new MemoryAuthRepository({
@@ -243,7 +322,11 @@ describe("license API", () => {
       passwordHash,
       role: "super_admin"
     });
-    const app = createApp({ licenseService: new LicenseService(new MemoryLicenseRepository()), authRepository });
+    const app = createApp({
+      licenseService: new LicenseService(new MemoryLicenseRepository()),
+      authRepository,
+      auditRepository: new MemoryAuditRepository()
+    });
 
     const login = await request(app)
       .post("/api/auth/login")

@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { addDays, isExpired } from "../utils/dates.js";
 import { generateLicenseKey, isLicenseKey, normalizeLicenseKey } from "../utils/licenseKey.js";
-import type { AuditActor, AuditRepository, LicensePlan, LicenseRecord, LicenseRepository, LicenseStatus } from "../types.js";
-
+import { packageForPlan } from "../packages.js";
+import type { AuditActor, AuditRepository, LicensePlan, LicenseRecord, LicenseRepository, LicenseStatus, PackageRepository } from "../types.js";
 export const devicePayloadSchema = z.object({
   key: z.string(),
   device_id: z.string().min(16),
@@ -21,10 +21,16 @@ export class LicenseError extends Error {
   }
 }
 
-function toResponse(record: LicenseRecord) {
+function buildResponse(record: LicenseRecord, packageDefinitions: Awaited<ReturnType<PackageRepository["list"]>>) {
+  const packageLimits = packageForPlan(packageDefinitions, record.plan);
   return {
     license_key: record.key,
     plan: record.plan,
+    package_limits: {
+      video_limit: packageLimits.videoLimit,
+      template_limit: packageLimits.templateLimit,
+      worker_limit: packageLimits.workerLimit
+    },
     status: responseStatus(record),
     device_id: record.deviceId,
     hostname: record.hostname,
@@ -36,6 +42,11 @@ function toResponse(record: LicenseRecord) {
   };
 }
 
+async function toResponse(record: LicenseRecord, packageRepository?: PackageRepository) {
+  const packageDefinitions = packageRepository ? await packageRepository.list() : [];
+  return buildResponse(record, packageDefinitions);
+}
+
 function responseStatus(record: LicenseRecord): LicenseStatus {
   if (record.status === "revoked") return "revoked";
   if (isExpired(record.expiresAt)) return "expired";
@@ -45,11 +56,14 @@ function responseStatus(record: LicenseRecord): LicenseStatus {
 export class LicenseService {
   constructor(
     private readonly repository: LicenseRepository,
-    private readonly auditRepository?: AuditRepository
+    private readonly auditRepository?: AuditRepository,
+    private readonly packageRepository?: PackageRepository
   ) {}
 
   async listLicenses() {
-    return (await this.repository.list()).map(toResponse);
+    const licenses = await this.repository.list();
+    const packages = this.packageRepository ? await this.packageRepository.list() : [];
+    return licenses.map((license) => buildResponse(license, packages));
   }
 
   async listUsers() {
@@ -145,7 +159,36 @@ export class LicenseService {
     });
 
     await this.audit("license.created", record, { plan: record.plan, expiresAt: record.expiresAt.toISOString() }, actor);
-    return toResponse(record);
+    return toResponse(record, this.packageRepository);
+  }
+
+  async createBulkLicenses(input: {
+    count: number;
+    plan?: LicensePlan;
+    expiresAt?: string;
+    user?: { name: string; email: string; company?: string };
+  }, actor?: AuditActor) {
+    const created = [];
+    for (let index = 0; index < input.count; index += 1) {
+      created.push(await this.createLicense({
+        plan: input.plan,
+        expiresAt: input.expiresAt,
+        user: input.count === 1 ? input.user : undefined
+      }, actor));
+    }
+    await this.auditRepository?.record({
+      action: "license.bulk_created",
+      subjectType: "license",
+      subjectId: null,
+      adminUserId: actor?.adminUserId,
+      adminEmail: actor?.adminEmail,
+      metadata: {
+        count: created.length,
+        plan: input.plan ?? "pro",
+        expiresAt: input.expiresAt ?? null
+      }
+    });
+    return created;
   }
 
   async updateLicense(input: {
@@ -180,7 +223,7 @@ export class LicenseService {
       },
       actor
     );
-    return toResponse(updated);
+    return toResponse(updated, this.packageRepository);
   }
 
   async validate(input: z.infer<typeof devicePayloadSchema>) {
@@ -200,7 +243,7 @@ export class LicenseService {
     }
 
     const verified = await this.repository.touchVerification(payload.key);
-    return { valid: true, ...toResponse(verified) };
+    return { valid: true, ...(await toResponse(verified, this.packageRepository)) };
   }
 
   async activate(input: z.infer<typeof devicePayloadSchema>) {
@@ -230,7 +273,7 @@ export class LicenseService {
     if (!license.deviceId) {
       await this.audit("license.activated", activated, { deviceId: payload.device_id, hostname: payload.hostname, os: payload.os });
     }
-    return { valid: true, ...toResponse(activated) };
+    return { valid: true, ...(await toResponse(activated, this.packageRepository)) };
   }
 
   async renew(keyInput: string, days: number, actor?: AuditActor) {
@@ -241,7 +284,7 @@ export class LicenseService {
     const baseDate = license.expiresAt.getTime() > Date.now() ? license.expiresAt : new Date();
     const renewed = await this.repository.renew(key, addDays(baseDate, days));
     await this.audit("license.renewed", renewed, { days, expiresAt: renewed.expiresAt.toISOString() }, actor);
-    return toResponse(renewed);
+    return toResponse(renewed, this.packageRepository);
   }
 
   async revoke(keyInput: string, actor?: AuditActor) {
@@ -249,7 +292,7 @@ export class LicenseService {
     if (!(await this.repository.findByKey(key))) throw new LicenseError("LIC_001", 404, "License not found");
     const revoked = await this.repository.revoke(key);
     await this.audit("license.revoked", revoked, undefined, actor);
-    return toResponse(revoked);
+    return toResponse(revoked, this.packageRepository);
   }
 
   async resetDevice(keyInput: string, actor?: AuditActor) {
@@ -259,14 +302,14 @@ export class LicenseService {
     if (license.status === "revoked") throw new LicenseError("LIC_004", 403, "License revoked");
     const reset = await this.repository.resetDevice(key);
     await this.audit("license.device_reset", reset, { previousDeviceId: license.deviceId }, actor);
-    return toResponse(reset);
+    return toResponse(reset, this.packageRepository);
   }
 
   async status(keyInput: string) {
     const key = normalizeLicenseKey(keyInput);
     const license = await this.repository.findByKey(key);
     if (!license) throw new LicenseError("LIC_001", 404, "License not found");
-    return toResponse(license);
+    return toResponse(license, this.packageRepository);
   }
 
   private async audit(action: string, record: LicenseRecord, metadata?: Record<string, unknown>, actor?: AuditActor) {

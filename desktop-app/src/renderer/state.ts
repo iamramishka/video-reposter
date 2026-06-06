@@ -1,5 +1,9 @@
 import { platformPresets } from "../shared/processing";
-import type { ImportedVideoFile, TransformSettings } from "../shared/processing";
+import type { ImportedVideoFile, PlatformPreset, TransformSettings } from "../shared/processing";
+import { processingFailureMessages } from "../shared/processingFailure";
+import type { ProcessingFailure } from "../shared/processingFailure";
+
+export type QueueFailure = Pick<ProcessingFailure, "code" | "message" | "retryable" | "recovery">;
 
 export type QueueStatus = "queued" | "starting" | "processing" | "paused" | "complete" | "failed";
 
@@ -16,6 +20,9 @@ export type QueueItem = {
   transformSummary?: string;
   durationSeconds?: number;
   resolution?: string;
+  codec?: string;
+  metadataState?: "probing" | "ready" | "unavailable";
+  failure?: QueueFailure;
 };
 
 export type HistoryItem = {
@@ -25,23 +32,45 @@ export type HistoryItem = {
   completedAt: string;
   outputPath?: string;
   sourcePath?: string;
+  sourceSize?: number;
   presetName?: string;
   transformSummary?: string;
   resolution?: string;
   durationSeconds?: number;
+  codec?: string;
   message?: string;
+  failure?: QueueFailure;
+};
+
+export type HistoryFilter = "all" | "complete" | "failed";
+export type ImportSource = "files" | "folder";
+
+export type ProcessingActionState = {
+  activeCount: number;
+  schedulableCount: number;
+  startDisabled: boolean;
+  pauseDisabled: boolean;
+  stopDisabled: boolean;
+  startReason?: string;
 };
 
 export type ProcessingPreferences = {
-  selectedPresetId: string;
+  defaultPresetId: string;
   outputDir: string;
   maxWorkers: number;
   transforms: TransformSettings;
 };
 
+export type CurrentBatchSettings = {
+  presetId: string;
+  outputDir: string;
+  maxWorkers: number;
+};
+
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 
 export const defaultTransforms: TransformSettings = {
+  scalePercent: 100,
   brightness: 0,
   contrast: 0,
   saturation: 0,
@@ -50,7 +79,7 @@ export const defaultTransforms: TransformSettings = {
 };
 
 export const defaultPreferences: ProcessingPreferences = {
-  selectedPresetId: "instagram-reel",
+  defaultPresetId: "instagram-reel",
   outputDir: "",
   maxWorkers: 2,
   transforms: defaultTransforms
@@ -68,6 +97,7 @@ export function cleanTransforms(transforms: TransformSettings): TransformSetting
     mirrorVertical: transforms.mirrorVertical || undefined,
     rotateDegrees: transforms.rotateDegrees,
     removeAudio: transforms.removeAudio || undefined,
+    scalePercent: transforms.scalePercent && transforms.scalePercent !== 100 ? transforms.scalePercent : undefined,
     brightness: transforms.brightness ? transforms.brightness : undefined,
     contrast: transforms.contrast ? transforms.contrast : undefined,
     saturation: transforms.saturation ? transforms.saturation : undefined,
@@ -83,6 +113,7 @@ export function summarizeTransforms(transforms: TransformSettings) {
     cleaned.mirrorVertical ? "flip" : "",
     cleaned.rotateDegrees ? `${cleaned.rotateDegrees} deg` : "",
     cleaned.removeAudio ? "muted" : "",
+    cleaned.scalePercent ? `scale ${cleaned.scalePercent}%` : "",
     cleaned.brightness ? "brightness" : "",
     cleaned.contrast ? "contrast" : "",
     cleaned.saturation ? "saturation" : "",
@@ -133,11 +164,101 @@ export function getQueueTotals(items: QueueItem[]) {
   };
 }
 
+export function getProcessingActionState(
+  items: QueueItem[],
+  processingAvailable: boolean | null,
+  running: boolean
+): ProcessingActionState {
+  const activeCount = items.filter((item) => item.status === "processing" || item.status === "starting").length;
+  const schedulableCount = items.filter((item) => (item.status === "queued" || item.status === "paused") && Boolean(item.path)).length;
+  let startReason: string | undefined;
+
+  if (processingAvailable === null) {
+    startReason = "Checking the video processing component.";
+  } else if (!processingAvailable) {
+    startReason = "Video processing is unavailable. Reinstall Video Reposter or contact support.";
+  } else if (running) {
+    startReason = activeCount > 0 ? "The batch is running." : "Starting queued videos.";
+  } else if (schedulableCount === 0) {
+    startReason = items.length === 0 ? "Import at least one video to start." : "No queued videos are ready to process.";
+  }
+
+  return {
+    activeCount,
+    schedulableCount,
+    startDisabled: processingAvailable !== true || running || schedulableCount === 0,
+    pauseDisabled: !running || activeCount === 0,
+    stopDisabled: activeCount === 0,
+    startReason
+  };
+}
+
+export function getNewBatchItems(items: QueueItem[]) {
+  return items.filter((item) => item.status === "queued" || item.status === "paused");
+}
+
+export function getFinishedQueueItems(items: QueueItem[]) {
+  return items.filter((item) => item.status === "complete" || item.status === "failed");
+}
+
+export function getPresetAccess(presets: PlatformPreset[], presetLimit: number) {
+  return presets.map((preset, index) => ({
+    preset,
+    included: index < Math.max(0, presetLimit)
+  }));
+}
+
+export function isNewBatchLocked(items: QueueItem[], running: boolean) {
+  return running || items.some((item) => item.status === "processing" || item.status === "starting");
+}
+
+export function currentBatchSettingsFromPreferences(preferences: ProcessingPreferences, workerLimit = 4): CurrentBatchSettings {
+  return {
+    presetId: preferences.defaultPresetId,
+    outputDir: preferences.outputDir,
+    maxWorkers: Math.min(preferences.maxWorkers, workerLimit)
+  };
+}
+
+export function restoredDefaultPreferences(workerLimit = 4, fallbackPresetId = defaultPreferences.defaultPresetId): ProcessingPreferences {
+  return {
+    ...defaultPreferences,
+    maxWorkers: Math.min(defaultPreferences.maxWorkers, workerLimit),
+    defaultPresetId: fallbackPresetId,
+    transforms: { ...defaultTransforms }
+  };
+}
+
+export function queueStatusLabel(status: QueueStatus) {
+  if (status === "queued") return "Waiting";
+  if (status === "starting") return "Starting";
+  if (status === "processing") return "Processing";
+  if (status === "paused") return "Paused";
+  if (status === "complete") return "Completed";
+  return "Failed";
+}
+
+export function importSourceLabel(source: ImportSource) {
+  return source === "folder" ? "selected folder" : "selected files";
+}
+
 export function formatBytes(bytes: number) {
   if (!bytes) return "0 MB";
   const units = ["B", "KB", "MB", "GB", "TB"];
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   return `${(bytes / 1024 ** index).toFixed(index < 2 ? 0 : 1)} ${units[index]}`;
+}
+
+export function formatDuration(seconds?: number) {
+  if (!seconds || !Number.isFinite(seconds)) return "Unknown duration";
+  const rounded = Math.round(seconds);
+  const minutes = Math.floor(rounded / 60);
+  return `${minutes}:${String(rounded % 60).padStart(2, "0")}`;
+}
+
+export function formatVideoFormat(path?: string, codec?: string) {
+  const extension = path?.split(".").pop()?.toUpperCase();
+  return [extension, codec?.toUpperCase()].filter(Boolean).join(" · ") || "Unknown format";
 }
 
 export function loadHistory(storage = getStorage()): HistoryItem[] {
@@ -146,7 +267,10 @@ export function loadHistory(storage = getStorage()): HistoryItem[] {
     if (!stored) return [];
     const parsed = JSON.parse(stored) as HistoryItem[];
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item) => item.id && item.name && item.completedAt).slice(0, 50);
+    return parsed.flatMap((item) => {
+      if (!item.id || !item.name || !item.completedAt || (item.status !== "complete" && item.status !== "failed")) return [];
+      return [{ ...item, failure: sanitizeQueueFailure(item.failure) }];
+    }).slice(0, 50);
   } catch {
     return [];
   }
@@ -164,12 +288,13 @@ export function loadPreferences(storage = getStorage()): ProcessingPreferences {
   try {
     const stored = storage?.getItem(preferencesStorageKey);
     if (!stored) return defaultPreferences;
-    const parsed = JSON.parse(stored) as Partial<ProcessingPreferences>;
+    const parsed = JSON.parse(stored) as Partial<ProcessingPreferences> & { selectedPresetId?: unknown };
+    const savedDefaultPresetId = typeof parsed.defaultPresetId === "string" ? parsed.defaultPresetId : parsed.selectedPresetId;
     return {
-      selectedPresetId:
-        typeof parsed.selectedPresetId === "string" && platformPresets.some((preset) => preset.id === parsed.selectedPresetId)
-          ? parsed.selectedPresetId
-          : defaultPreferences.selectedPresetId,
+      defaultPresetId:
+        typeof savedDefaultPresetId === "string" && platformPresets.some((preset) => preset.id === savedDefaultPresetId)
+          ? savedDefaultPresetId
+          : defaultPreferences.defaultPresetId,
       outputDir: typeof parsed.outputDir === "string" ? parsed.outputDir : "",
       maxWorkers: clampWorkers(parsed.maxWorkers),
       transforms: sanitizeTransforms(parsed.transforms)
@@ -201,7 +326,8 @@ export function loadQueue(storage = getStorage()): QueueItem[] {
           ...item,
           status,
           progress: status === "queued" ? 0 : clampNumber(item.progress, 0, 100, 0),
-          processingJobId: undefined
+          processingJobId: undefined,
+          failure: sanitizeQueueFailure(item.failure)
         }
       ];
     }).slice(0, 200);
@@ -231,6 +357,7 @@ export function sanitizeTransforms(value: unknown): TransformSettings {
     mirrorVertical: Boolean(transforms.mirrorVertical) || undefined,
     removeAudio: Boolean(transforms.removeAudio) || undefined,
     rotateDegrees: transforms.rotateDegrees === 90 || transforms.rotateDegrees === 180 || transforms.rotateDegrees === 270 ? transforms.rotateDegrees : undefined,
+    scalePercent: clampNumber(transforms.scalePercent, 100, 200, 100),
     brightness: clampNumber(transforms.brightness, -50, 50, 0),
     contrast: clampNumber(transforms.contrast, -50, 50, 0),
     saturation: clampNumber(transforms.saturation, -50, 50, 0),
@@ -255,6 +382,14 @@ export function formatHistoryDate(value: string) {
   return date.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
+export function filterHistoryItems(history: HistoryItem[], filter: HistoryFilter) {
+  return filter === "all" ? history : history.filter((item) => item.status === filter);
+}
+
+export function canRetryHistoryItem(item: HistoryItem) {
+  return item.status === "failed" && Boolean(item.sourcePath) && item.failure?.retryable === true;
+}
+
 function isValidQueueItem(item: unknown): item is QueueItem {
   if (!item || typeof item !== "object") return false;
   const next = item as QueueItem;
@@ -263,6 +398,24 @@ function isValidQueueItem(item: unknown): item is QueueItem {
 
 function isQueueStatus(status: unknown): status is QueueStatus {
   return status === "queued" || status === "starting" || status === "processing" || status === "paused" || status === "complete" || status === "failed";
+}
+
+function sanitizeQueueFailure(value: unknown): QueueFailure | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const code = (value as { code?: unknown }).code;
+  if (code === "component_unavailable") {
+    return { code, message: processingFailureMessages.componentUnavailable, retryable: false, recovery: "reinstall_support" };
+  }
+  if (code === "invalid_video") {
+    return { code, message: processingFailureMessages.invalidVideo, retryable: false, recovery: "replace_video" };
+  }
+  if (code === "output_folder") {
+    return { code, message: processingFailureMessages.outputFolder, retryable: true, recovery: "choose_output" };
+  }
+  if (code === "processing_failed") {
+    return { code, message: processingFailureMessages.processingFailed, retryable: true, recovery: "retry_support" };
+  }
+  return undefined;
 }
 
 function getStorage(): StorageLike | undefined {

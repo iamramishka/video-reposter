@@ -31,10 +31,21 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     }
     (req as AdminRequest)[adminSymbol] = {
       adminUserId: (payload as AdminPayload).sub,
-      adminEmail: typeof (payload as AdminPayload).email === "string" ? (payload as AdminPayload).email : undefined
+      adminEmail: typeof (payload as AdminPayload).email === "string" ? (payload as AdminPayload).email : undefined,
+      adminRole: typeof (payload as AdminPayload).role === "string" ? (payload as AdminPayload).role : undefined
     };
     next();
   } catch {
     res.status(401).json({ code: "AUTH_INVALID", message: "Invalid or expired admin token" });
   }
+}
+
+export function requireWritableAdmin(req: Request, res: Response, next: NextFunction) {
+  requireAdmin(req, res, () => {
+    const role = getAdminActor(req)?.adminRole;
+    if (role === "read_only") {
+      return res.status(403).json({ code: "AUTH_READ_ONLY", message: "Read-only admins cannot change records" });
+    }
+    next();
+  });
 }

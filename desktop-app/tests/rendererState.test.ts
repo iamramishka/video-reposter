@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultPreferences,
+  buildQueueItems,
+  buildQueueItemsFromImports,
+  canRetryHistoryItem,
+  currentBatchSettingsFromPreferences,
+  filterHistoryItems,
+  formatDuration,
+  formatVideoFormat,
+  getFinishedQueueItems,
+  getNewBatchItems,
+  getPresetAccess,
+  getProcessingActionState,
+  importSourceLabel,
+  isNewBatchLocked,
+  queueStatusLabel,
+  restoredDefaultPreferences,
   historyStorageKey,
   loadHistory,
   loadPreferences,
@@ -54,6 +69,22 @@ describe("renderer state persistence", () => {
     ]);
   });
 
+  it("preserves structured failure retryability in queue snapshots", () => {
+    const storage = memoryStorage();
+    const failure = {
+      code: "component_unavailable" as const,
+      message: "Video processing is unavailable. Reinstall Video Reposter or contact support.",
+      retryable: false,
+      recovery: "reinstall_support" as const
+    };
+
+    saveQueue([{ id: "a", name: "failed.mp4", size: 100, progress: 0, status: "failed", failure }], storage);
+
+    expect(loadQueue(storage)).toEqual([
+      expect.objectContaining({ status: "failed", failure: expect.objectContaining({ code: "component_unavailable", retryable: false }) })
+    ]);
+  });
+
   it("validates stored processing preferences", () => {
     const storage = memoryStorage({
       [preferencesStorageKey]: JSON.stringify({
@@ -66,6 +97,7 @@ describe("renderer state persistence", () => {
           saturation: "nope",
           sharpness: 999,
           volume: -20,
+          scalePercent: 999,
           rotateDegrees: 45,
           mirrorHorizontal: true
         }
@@ -73,7 +105,7 @@ describe("renderer state persistence", () => {
     });
 
     expect(loadPreferences(storage)).toEqual({
-      selectedPresetId: defaultPreferences.selectedPresetId,
+      defaultPresetId: defaultPreferences.defaultPresetId,
       outputDir: "C:/Output",
       maxWorkers: 4,
       transforms: {
@@ -81,6 +113,7 @@ describe("renderer state persistence", () => {
         mirrorVertical: undefined,
         removeAudio: undefined,
         rotateDegrees: undefined,
+        scalePercent: 200,
         brightness: 50,
         contrast: -50,
         saturation: 0,
@@ -90,10 +123,23 @@ describe("renderer state persistence", () => {
     });
   });
 
+  it("migrates the legacy selected preset into the saved default preset", () => {
+    const storage = memoryStorage({
+      [preferencesStorageKey]: JSON.stringify({
+        selectedPresetId: "facebook-reel",
+        outputDir: "",
+        maxWorkers: 2,
+        transforms: {}
+      })
+    });
+
+    expect(loadPreferences(storage).defaultPresetId).toBe("facebook-reel");
+  });
+
   it("saves preferences and keeps history to the newest fifty entries", () => {
     const storage = memoryStorage();
     const preferences: ProcessingPreferences = {
-      selectedPresetId: "tiktok",
+      defaultPresetId: "tiktok",
       outputDir: "C:/Output",
       maxWorkers: 3,
       transforms: { volume: 80 }
@@ -113,8 +159,219 @@ describe("renderer state persistence", () => {
     expect(JSON.parse(storage.read(historyStorageKey)!)).toHaveLength(50);
   });
 
+  it("preserves safe failure metadata and source details in History", () => {
+    const storage = memoryStorage();
+    const failed: HistoryItem = {
+      id: "failed-attempt",
+      name: "failed.mp4",
+      status: "failed",
+      completedAt: new Date(2026, 5, 6).toISOString(),
+      sourcePath: "C:/videos/failed.mp4",
+      sourceSize: 2048,
+      presetName: "TikTok",
+      message: "Video processing failed. Try again. If it keeps failing, contact support.",
+      failure: {
+        code: "processing_failed",
+        message: "Video processing failed. Try again. If it keeps failing, contact support.",
+        retryable: true,
+        recovery: "retry_support"
+      }
+    };
+
+    saveHistory([failed], storage);
+
+    expect(loadHistory(storage)).toEqual([failed]);
+    expect(canRetryHistoryItem(loadHistory(storage)[0])).toBe(true);
+  });
+
+  it("filters History and only retries retryable failures with source files", () => {
+    const complete: HistoryItem = { id: "complete", name: "done.mp4", status: "complete", completedAt: "2026-06-06T00:00:00.000Z" };
+    const retryable: HistoryItem = {
+      id: "retryable",
+      name: "retry.mp4",
+      status: "failed",
+      completedAt: "2026-06-06T00:00:00.000Z",
+      sourcePath: "C:/retry.mp4",
+      failure: { code: "output_folder", message: "The output folder could not be used. Choose another output folder and try again.", retryable: true, recovery: "choose_output" }
+    };
+    const blocked: HistoryItem = {
+      id: "blocked",
+      name: "blocked.mp4",
+      status: "failed",
+      completedAt: "2026-06-06T00:00:00.000Z",
+      sourcePath: "C:/blocked.mp4",
+      failure: { code: "invalid_video", message: "This video could not be read. Remove it and choose a supported video file.", retryable: false, recovery: "replace_video" }
+    };
+
+    expect(filterHistoryItems([complete, retryable, blocked], "complete")).toEqual([complete]);
+    expect(filterHistoryItems([complete, retryable, blocked], "failed")).toEqual([retryable, blocked]);
+    expect(canRetryHistoryItem(retryable)).toBe(true);
+    expect(canRetryHistoryItem(blocked)).toBe(false);
+    expect(canRetryHistoryItem({ ...retryable, sourcePath: undefined })).toBe(false);
+  });
+
+  it("enables processing actions only when they can affect the queue", () => {
+    expect(getProcessingActionState([], true, false)).toMatchObject({
+      activeCount: 0,
+      schedulableCount: 0,
+      startDisabled: true,
+      pauseDisabled: true,
+      stopDisabled: true,
+      startReason: "Import at least one video to start."
+    });
+
+    const queued: QueueItem = { id: "queued", path: "C:/video.mp4", name: "video.mp4", size: 10, progress: 0, status: "queued" };
+    expect(getProcessingActionState([queued], true, false)).toMatchObject({
+      schedulableCount: 1,
+      startDisabled: false,
+      pauseDisabled: true,
+      stopDisabled: true
+    });
+
+    const active: QueueItem = { ...queued, status: "processing", processingJobId: "job-1" };
+    expect(getProcessingActionState([active], true, true)).toMatchObject({
+      activeCount: 1,
+      startDisabled: true,
+      pauseDisabled: false,
+      stopDisabled: false,
+      startReason: "The batch is running."
+    });
+  });
+
+  it("blocks Start for unavailable processing, invalid imports, and terminal queue items", () => {
+    const invalid: QueueItem = { id: "invalid", name: "browser-preview.mp4", size: 10, progress: 0, status: "queued" };
+    const complete: QueueItem = { id: "complete", path: "C:/done.mp4", name: "done.mp4", size: 10, progress: 100, status: "complete" };
+
+    expect(getProcessingActionState([invalid], true, false)).toMatchObject({
+      schedulableCount: 0,
+      startDisabled: true,
+      startReason: "No queued videos are ready to process."
+    });
+    expect(getProcessingActionState([complete], true, false).startDisabled).toBe(true);
+    expect(getProcessingActionState([{ ...invalid, path: "C:/video.mp4" }], false, false)).toMatchObject({
+      startDisabled: true,
+      startReason: "Video processing is unavailable. Reinstall Video Reposter or contact support."
+    });
+  });
+
+  it("keeps New Batch focused on preparation work and locks it during active processing", () => {
+    const queued: QueueItem = { id: "queued", path: "C:/queued.mp4", name: "queued.mp4", size: 10, progress: 0, status: "queued" };
+    const paused: QueueItem = { ...queued, id: "paused", status: "paused" };
+    const active: QueueItem = { ...queued, id: "active", status: "processing", processingJobId: "job-1" };
+    const complete: QueueItem = { ...queued, id: "complete", status: "complete", progress: 100 };
+
+    expect(getNewBatchItems([queued, paused, active, complete])).toEqual([queued, paused]);
+    expect(isNewBatchLocked([queued], false)).toBe(false);
+    expect(isNewBatchLocked([active], false)).toBe(true);
+    expect(isNewBatchLocked([queued], true)).toBe(true);
+  });
+
+  it("identifies only completed and failed queue entries as finished", () => {
+    const queued: QueueItem = { id: "queued", name: "queued.mp4", size: 10, progress: 0, status: "queued" };
+    const processing: QueueItem = { ...queued, id: "processing", status: "processing" };
+    const complete: QueueItem = { ...queued, id: "complete", status: "complete", progress: 100 };
+    const failed: QueueItem = { ...queued, id: "failed", status: "failed" };
+
+    expect(getFinishedQueueItems([queued, processing, complete, failed])).toEqual([complete, failed]);
+  });
+
+  it("keeps package-restricted presets visible while marking their access", () => {
+    const access = getPresetAccess([
+      { id: "instagram-reel", name: "Instagram Reel", settings: { width: 1080, height: 1920, fps: 30, videoBitrate: "4M", audioBitrate: "128k", codec: "libx264" } },
+      { id: "youtube-short", name: "YouTube Short", settings: { width: 1080, height: 1920, fps: 60, videoBitrate: "8M", audioBitrate: "192k", codec: "libx264" } },
+      { id: "tiktok", name: "TikTok", settings: { width: 1080, height: 1920, fps: 30, videoBitrate: "4M", audioBitrate: "128k", codec: "libx264" } }
+    ], 2);
+
+    expect(access.map(({ preset, included }) => ({ id: preset.id, included }))).toEqual([
+      { id: "instagram-reel", included: true },
+      { id: "youtube-short", included: true },
+      { id: "tiktok", included: false }
+    ]);
+  });
+
+  it("uses customer-readable queue status labels", () => {
+    expect(queueStatusLabel("queued")).toBe("Waiting");
+    expect(queueStatusLabel("starting")).toBe("Starting");
+    expect(queueStatusLabel("processing")).toBe("Processing");
+    expect(queueStatusLabel("paused")).toBe("Paused");
+    expect(queueStatusLabel("complete")).toBe("Completed");
+    expect(queueStatusLabel("failed")).toBe("Failed");
+  });
+
+  it("uses distinct customer-readable import source labels", () => {
+    expect(importSourceLabel("files")).toBe("selected files");
+    expect(importSourceLabel("folder")).toBe("selected folder");
+  });
+
+  it("formats video metadata for customer-facing file details", () => {
+    expect(formatDuration(65.4)).toBe("1:05");
+    expect(formatDuration()).toBe("Unknown duration");
+    expect(formatVideoFormat("C:/videos/clip.mp4", "h264")).toBe("MP4 · H264");
+    expect(formatVideoFormat()).toBe("Unknown format");
+  });
+
+  it("copies saved defaults into independent current-batch settings", () => {
+    const preferences: ProcessingPreferences = {
+      defaultPresetId: "youtube-short",
+      outputDir: "C:/Default Output",
+      maxWorkers: 3,
+      transforms: {}
+    };
+
+    const currentBatch = currentBatchSettingsFromPreferences(preferences, 2);
+    preferences.outputDir = "C:/Changed Default";
+    preferences.maxWorkers = 1;
+
+    expect(currentBatch).toEqual({
+      presetId: "youtube-short",
+      outputDir: "C:/Default Output",
+      maxWorkers: 2
+    });
+  });
+
+  it("restores explicit saved defaults without sharing mutable adjustment state", () => {
+    const restored = restoredDefaultPreferences(1, "youtube-short");
+
+    expect(restored).toEqual({
+      defaultPresetId: "youtube-short",
+      outputDir: "",
+      maxWorkers: 1,
+      transforms: {
+        scalePercent: 100,
+        brightness: 0,
+        contrast: 0,
+        saturation: 0,
+        sharpness: 0,
+        volume: 100
+      }
+    });
+
+    restored.transforms.scalePercent = 150;
+    expect(defaultPreferences.transforms.scalePercent).toBe(100);
+  });
+
   it("summarizes non-default transforms", () => {
-    expect(summarizeTransforms({ mirrorHorizontal: true, rotateDegrees: 90, volume: 80 })).toBe("mirror, 90 deg, volume");
+    expect(summarizeTransforms({ mirrorHorizontal: true, rotateDegrees: 90, scalePercent: 125, volume: 80 })).toBe("mirror, 90 deg, scale 125%, volume");
     expect(summarizeTransforms({ brightness: 0, volume: 100 })).toBeUndefined();
+  });
+
+  it("skips unsupported and duplicate imports", () => {
+    const existing: QueueItem[] = [{ id: "existing", name: "clip.mp4", size: 4, progress: 0, status: "queued" }];
+    const result = buildQueueItems([
+      new File(["same"], "clip.mp4", { lastModified: 1 }),
+      new File(["new"], "new.MOV", { lastModified: 2 }),
+      new File(["bad"], "notes.txt", { lastModified: 3 })
+    ], existing);
+
+    expect(result.skipped).toBe(2);
+    expect(result.items).toEqual([expect.objectContaining({ name: "new.MOV", status: "queued" })]);
+
+    const imported = buildQueueItemsFromImports([
+      { path: "C:/clips/a.mp4", name: "a.mp4", size: 10, lastModified: 1 },
+      { path: "C:/clips/a.mp4", name: "a.mp4", size: 10, lastModified: 1 }
+    ], []);
+
+    expect(imported.skipped).toBe(1);
+    expect(imported.items).toHaveLength(1);
   });
 });

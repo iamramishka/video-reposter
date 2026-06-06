@@ -18,6 +18,7 @@ export type OutputSettings = {
 export type TransformSettings = {
   mirrorHorizontal?: boolean;
   mirrorVertical?: boolean;
+  scalePercent?: number;
   brightness?: number;
   contrast?: number;
   saturation?: number;
@@ -146,10 +147,19 @@ function normalizeOutputSettings(output: OutputSettings): Required<Pick<OutputSe
 }
 
 function buildVideoFilters(output: OutputSettings, transforms: TransformSettings) {
-  const filters = [
-    `scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease`,
-    `pad=${output.width}:${output.height}:(ow-iw)/2:(oh-ih)/2:black`
-  ];
+  const scalePercent = typeof transforms.scalePercent === "number" ? transforms.scalePercent : 100;
+  const filters =
+    scalePercent > 100
+      ? [
+          `scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease`,
+          `pad=${output.width}:${output.height}:(ow-iw)/2:(oh-ih)/2:black`,
+          `scale=iw*${toFixed(scalePercent / 100)}:ih*${toFixed(scalePercent / 100)}`,
+          `crop=${output.width}:${output.height}:(iw-ow)/2:(ih-oh)/2`
+        ]
+      : [
+          `scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease`,
+          `pad=${output.width}:${output.height}:(ow-iw)/2:(oh-ih)/2:black`
+        ];
 
   if (transforms.mirrorHorizontal) filters.push("hflip");
   if (transforms.mirrorVertical) filters.push("vflip");

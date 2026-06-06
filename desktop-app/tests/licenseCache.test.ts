@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { decryptLicenseCache, encryptLicenseCache, readLicenseCache, writeLicenseCache } from "../src/main/licenseCache.js";
 import type { CachedLicense } from "../src/shared/license.js";
-import { stateFromCache } from "../src/shared/license.js";
+import { licenseRefreshDescription, licenseStateLabel, packageLimitsForLicense, stateFromCache } from "../src/shared/license.js";
 
 const cache: CachedLicense = {
   license_key: "VDRP-A1B2-C3D4-E5F6-G7H8",
@@ -38,5 +38,25 @@ describe("license cache", () => {
     expect(stateFromCache(cache)).toBe("VALID_FROM_CACHE");
     expect(stateFromCache({ ...cache, status: "revoked" })).toBe("REVOKED");
     expect(stateFromCache({ ...cache, expires_at: new Date(Date.now() - 90_000).toISOString() })).toBe("EXPIRED_GRACE");
+  });
+
+  it("uses package limits from the license with plan defaults as fallback", () => {
+    expect(packageLimitsForLicense({ ...cache, plan: "starter", package_limits: undefined })).toEqual({
+      video_limit: 5,
+      template_limit: 2,
+      worker_limit: 1
+    });
+    expect(packageLimitsForLicense({ ...cache, package_limits: { video_limit: 12, template_limit: 3, worker_limit: 2 } })).toEqual({
+      video_limit: 12,
+      template_limit: 3,
+      worker_limit: 2
+    });
+  });
+
+  it("describes online and cached license states for customers", () => {
+    expect(licenseStateLabel("VALID")).toBe("Active");
+    expect(licenseStateLabel("VALID_FROM_CACHE")).toBe("Offline access");
+    expect(licenseRefreshDescription("VALID")).toContain("Verified online");
+    expect(licenseRefreshDescription("VALID_FROM_CACHE")).toContain("Cached package limits remain active");
   });
 });

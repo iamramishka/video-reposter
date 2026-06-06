@@ -5,8 +5,8 @@ export class MemoryAuditRepository implements AuditRepository {
 
   async record(input: {
     action: string;
-    subjectType: "license";
-    subjectId?: string;
+    subjectType: "license" | "admin";
+    subjectId?: string | null;
     licenseId?: string;
     adminUserId?: string;
     adminEmail?: string;

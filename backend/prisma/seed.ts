@@ -1,12 +1,16 @@
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 import { addDays } from "../src/utils/dates.js";
+import { defaultPackageDefinitions, packagePlans } from "../src/packages.js";
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const email = process.env.ADMIN_EMAIL ?? "admin@videoreposter.local";
-  const password = process.env.ADMIN_PASSWORD ?? "admin12345";
+  const email = process.env.ADMIN_EMAIL;
+  const password = process.env.ADMIN_PASSWORD;
+  if (!email || !password) {
+    throw new Error("ADMIN_EMAIL and ADMIN_PASSWORD environment variables must be set before running the seed.");
+  }
 
   await prisma.adminUser.upsert({
     where: { email },
@@ -17,6 +21,14 @@ async function main() {
       role: "super_admin"
     }
   });
+
+  for (const plan of packagePlans) {
+    await prisma.packageDefinition.upsert({
+      where: { plan },
+      update: {},
+      create: defaultPackageDefinitions[plan]
+    });
+  }
 
   const user = await prisma.user.upsert({
     where: { email: "john.doe@example.com" },

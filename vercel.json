@@ -1,6 +1,5 @@
 {
   "buildCommand": "npm run build -w backend && npm run build -w admin-dashboard",
   "outputDirectory": "admin-dashboard/dist",
-  "installCommand": "npm install",
-  "framework": "vite"
+  "installCommand": "npm install"
 }

@@ -52,6 +52,19 @@ describe("processing command builder", () => {
     expect(args[args.indexOf("-af") + 1]).toBe("volume=0.8");
   });
 
+  it("scales video inside the fixed output frame", () => {
+    const args = buildFfmpegArgs({
+      inputPath: "in.mov",
+      outputPath: "out.mp4",
+      output: { width: 1280, height: 720, fps: 30, videoBitrate: "2M", audioBitrate: "128k", codec: "libx264" },
+      transforms: { scalePercent: 150 }
+    });
+
+    expect(args[args.indexOf("-vf") + 1]).toBe(
+      "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,scale=iw*1.5:ih*1.5,crop=1280:720:(iw-ow)/2:(ih-oh)/2"
+    );
+  });
+
   it("strips audio when requested", () => {
     const args = buildFfmpegArgs({
       inputPath: "in.webm",
