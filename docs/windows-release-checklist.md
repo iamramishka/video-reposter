@@ -62,3 +62,7 @@ For trusted signed builds, configure these GitHub Actions repository secrets:
 - `WINDOWS_CSC_KEY_PASSWORD`: certificate password
 
 Then run the workflow with **require_signature** enabled. A trusted certificate must be issued by a public certificate authority after owner identity verification; a locally generated certificate will not prevent SmartScreen warnings for customers.
+
+The first clean hosted verification passed on June 7, 2026:
+
+https://github.com/iamramishka/video-reposter/actions/runs/27071013065

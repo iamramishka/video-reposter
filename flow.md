@@ -58,9 +58,9 @@ Manual visual checks still recommended:
 - [x] Activate a license in the packaged/desktop runtime UI. Automated packaged-runtime smoke activated `VDRP-55E1-0EB4-8DC1-6A29`.
 - [x] Run a real FFmpeg job with sample video files. A generated sample video was processed successfully through the built processing command.
 - [x] Confirm installer/portable build behavior on this Windows PC.
-- [ ] Confirm installer/portable build behavior on a separate clean Windows PC.
+- [x] Confirm installer/portable build behavior on a separate clean Windows PC using the fresh GitHub-hosted Windows runner: https://github.com/iamramishka/video-reposter/actions/runs/27071013065
 - [x] Run the repeatable local release check with `npm run verify:windows-release`.
-- [~] Run `.github/workflows/windows-release-verification.yml` on a fresh GitHub-hosted Windows runner.
+- [x] Run `.github/workflows/windows-release-verification.yml` on a fresh GitHub-hosted Windows runner.
 
 ### Task 17 Final Workflow Run
 
