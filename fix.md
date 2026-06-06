@@ -283,7 +283,7 @@ Recommended final pages:
 - [x] Confirm failed jobs appear in History.
 - [x] Confirm clear/reset/retry actions behave as described.
 - [x] Check desktop layout at minimum supported window size.
-- [~] Check installer and portable builds on a clean Windows PC. Fresh-location install and portable launch passed on this Windows host. `npm run verify:windows-release` now automates hashes, signatures, temporary install, bundled-tool checks, and both launch checks; a separate clean PC remains an external release check.
+- [~] Check installer and portable builds on a clean Windows PC. Fresh-location install and portable launch passed on this Windows host. `npm run verify:windows-release` automates local verification, and `.github/workflows/windows-release-verification.yml` runs it on a fresh GitHub-hosted Windows runner. The hosted run must pass before completing this item.
 
 **Acceptance checks**
 

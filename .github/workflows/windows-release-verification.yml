@@ -1,0 +1,64 @@
+name: Windows Release Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      require_signature:
+        description: Fail when release artifacts are not code-signed
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify-windows-release:
+    name: Build and verify on clean Windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run desktop tests
+        run: npm test -w desktop-app
+
+      - name: Build Windows distributions
+        run: npm run dist -w desktop-app
+
+      - name: Verify setup and portable distributions
+        shell: powershell
+        run: |
+          $arguments = @(
+            "-ExecutionPolicy", "Bypass",
+            "-File", "scripts/verify-windows-release.ps1"
+          )
+          if ("${{ inputs.require_signature }}" -eq "true") {
+            $arguments += "-RequireSignature"
+          }
+          & powershell @arguments
+
+      - name: Upload verified Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-reposter-windows-x64
+          path: |
+            desktop-app/release/Video Reposter-Setup-*-x64.exe
+            desktop-app/release/Video Reposter-Portable-*-x64.exe
+            desktop-app/release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14

@@ -60,6 +60,7 @@ Manual visual checks still recommended:
 - [x] Confirm installer/portable build behavior on this Windows PC.
 - [ ] Confirm installer/portable build behavior on a separate clean Windows PC.
 - [x] Run the repeatable local release check with `npm run verify:windows-release`.
+- [~] Run `.github/workflows/windows-release-verification.yml` on a fresh GitHub-hosted Windows runner.
 
 ### Task 17 Final Workflow Run
 

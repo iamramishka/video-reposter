@@ -51,3 +51,14 @@ Copy the entire repository or the release artifacts and verification script to a
 6. Uninstall the setup version and confirm its shortcuts are removed.
 
 Do not mark the clean-PC release check complete until this separate-machine run passes.
+
+## Clean GitHub Windows Runner
+
+The repository includes `.github/workflows/windows-release-verification.yml`. Run **Windows Release Verification** from the GitHub Actions page to build and test on a fresh Microsoft-hosted Windows runner.
+
+For trusted signed builds, configure these GitHub Actions repository secrets:
+
+- `WINDOWS_CSC_LINK`: base64-encoded certificate, secure certificate URL, or other Electron Builder-supported certificate reference
+- `WINDOWS_CSC_KEY_PASSWORD`: certificate password
+
+Then run the workflow with **require_signature** enabled. A trusted certificate must be issued by a public certificate authority after owner identity verification; a locally generated certificate will not prevent SmartScreen warnings for customers.
