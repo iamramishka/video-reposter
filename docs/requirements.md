@@ -2,220 +2,192 @@
 
 ## System Overview
 
-**Project Name:** Video Reposter — Batch Processing & License Management System  
-**Type:** Windows Desktop Application + Online Admin Dashboard + Backend API  
-**Status:** Planning Phase
+Video Reposter is a Windows desktop batch video processor with online license activation, a backend API, and an admin dashboard.
 
----
+**Current status:** MVP scaffold implemented. Requirements below track target behavior and current gaps.
 
-## 1. Desktop Application Requirements
+## 1. Desktop Application
 
 ### 1.1 License Activation
-- [ ] Show license activation screen on first launch (no license cache found)
-- [ ] Accept license key in format: `VDRP-XXXX-XXXX-XXXX-XXXX`
-- [ ] Validate license online via API (POST /api/license/validate)
-- [ ] Bind license to device using SHA-256 hardware fingerprint (CPU + motherboard serial)
-- [ ] Store license encrypted locally (AES-256-GCM)
-- [ ] Support license expiry dates (monthly / yearly plans)
-- [ ] 72-hour offline grace period when server unreachable
-- [ ] 24-hour grace period after license expiry before hard block
-- [ ] Show renewal CTA when license expires
-- [ ] Block app when license is revoked (no grace period)
-- [ ] Show device conflict dialog when device ID doesn't match
-- [ ] Allow device reset ONLY from admin dashboard
-- [ ] Rate limit validation attempts (5 failures → 1-hour lockout)
-- [ ] Send expiry reminders at 30, 14, 7, 1 days before expiry
+
+- [x] Show license activation screen on first launch when no license cache is available
+- [x] Accept license key in format `VDRP-XXXX-XXXX-XXXX-XXXX`
+- [x] Validate license online through backend API
+- [x] Bind license to device identifier
+- [x] Store license cache encrypted locally
+- [x] Support expiry dates and revoked status
+- [x] Provide offline grace handling in license cache logic
+- [ ] Send expiry reminder emails at 30, 14, 7, and 1 days before expiry
+- [ ] Add richer device conflict recovery UX
 
 ### 1.2 Video Input
-- [ ] Single video file upload (file picker)
-- [ ] Bulk video upload (multi-select)
-- [ ] Drag and drop files onto the app
-- [ ] Import entire folder (all supported videos inside)
-- [ ] Supported formats: .mp4, .mov, .avi, .mkv, .webm, .flv
-- [ ] Show file count, total size, and validation status on import
-- [ ] Detect and skip duplicate files (same filename + size)
 
-### 1.3 Video Processing Features
+- [x] Supported extensions: `.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`, `.flv`
+- [x] Duplicate detection by filename and size in renderer state helpers
+- [x] FFprobe metadata validation
+- [x] Full folder import UI with recursive native/local-worker folder scanning
+- [ ] Drag-and-drop polish across all supported views
+- [ ] Import summary with total size and validation status
 
-#### Transformation
-- [ ] Mirror / flip video (horizontal / vertical)
-- [ ] Brightness adjustment (slider, -100 to +100)
-- [ ] Contrast adjustment (slider, -100 to +100)
-- [ ] Saturation adjustment (slider, -100 to +100)
-- [ ] Sharpness adjustment (slider, 0 to 100)
-- [ ] Resize video (preset sizes or custom width×height)
-- [ ] Crop video (define crop area)
-- [ ] Rotate video (90°, 180°, 270°, or custom degrees)
+### 1.3 Video Processing
 
-#### Watermark
-- [ ] Add logo/image watermark (PNG with transparency support)
-- [ ] Add text watermark (custom text, font, size, color)
-- [ ] Watermark position: top-left, top-right, bottom-left, bottom-right, center
-- [ ] Watermark opacity control (0–100%)
-- [ ] Watermark padding from edge (px)
+- [x] Deterministic FFmpeg argument generation
+- [x] Horizontal and vertical flip
+- [x] Brightness, contrast, saturation, and sharpness filters
+- [x] Resize/pad for platform presets
+- [x] Rotate 90, 180, and 270 degrees
+- [x] Remove audio
+- [x] Volume control
+- [x] Duration cap per preset
+- [x] Crop region UI and command support
+- [x] Logo/image watermark
+- [x] Text watermark
+- [x] Replace audio
+- [x] Pitch adjustment
+- [x] Speed adjustment
+- [x] Fade in and fade out
 
-#### Audio
-- [ ] Remove original audio track
-- [ ] Replace audio with custom file (.mp3, .wav, .aac)
-- [ ] Audio volume control (0–200%)
-- [ ] Audio pitch adjustment (semitones)
-- [ ] Speed adjustment (0.25x – 4.0x, affects audio + video)
-- [ ] Fade in (duration in seconds)
-- [ ] Fade out (duration in seconds)
+### 1.4 Output
 
-### 1.4 Output Settings
-- [ ] Select output save location (folder picker)
-- [ ] Custom file naming template: `{original}_{preset}_{date}` etc.
-- [ ] Export format: MP4 (primary), MKV (optional)
-- [ ] Quality presets: Low / Medium / High / Ultra
-- [ ] Resolution selection: 720p / 1080p / 1440p / 4K / Original / Custom
-- [ ] Codec: H.264 (default), H.265 (optional), VP9 (optional)
+- [x] Output path support in processing jobs
+- [x] Codec, bitrate, resolution, FPS, and audio bitrate settings in shared types
+- [ ] Output folder picker polish
+- [x] Custom file naming template
+- [x] Optional MKV and MOV output
+- [ ] Quality presets
+- [ ] Custom resolution UI
 
-### 1.5 Processing Controls
-- [ ] Start batch processing
-- [ ] Pause processing (suspend workers at safe checkpoint)
-- [ ] Resume processing (continue from where paused)
-- [ ] Stop processing (kill workers, clean temp files, reset queue)
-- [ ] Per-video progress bar with percentage
-- [ ] Overall batch progress bar
-- [ ] ETA (estimated time remaining) per video and overall
-- [ ] Processing queue view (list of all videos + status)
-- [ ] Error display per video (error code + human-readable reason)
-- [ ] Processing log panel (scrollable, timestamped)
-- [ ] Auto-open output folder on completion (optional toggle)
+### 1.5 Controls And Logs
+
+- [x] Start and stop processing jobs
+- [x] Per-video progress parsing from FFmpeg stderr
+- [x] Structured customer-safe failure messages
+- [x] Timestamped processing logs
+- [x] Queue/history state helpers
+- [ ] Pause/resume safe checkpoints
+- [ ] Overall ETA
+- [ ] Auto-open output folder option
 
 ### 1.6 Platform Presets
-- [ ] Instagram Reel (1080×1920, 30fps, H.264, max 90s)
-- [ ] YouTube Short (1080×1920, 60fps, H.264, max 60s)
-- [ ] TikTok (1080×1920, 30fps, H.264, max 180s)
-- [ ] Twitter / X (1280×720, 30fps, H.264, max 140s)
-- [ ] Facebook Reel (1080×1920, 30fps, H.265, max 90s)
-- [ ] Custom (user-defined all settings)
 
----
+- [x] Instagram Reel
+- [x] YouTube Short
+- [x] TikTok
+- [x] Twitter/X
+- [x] Facebook Reel
+- [ ] Fully custom preset editor
 
-## 2. Admin Dashboard Requirements
+## 2. Admin Dashboard
 
 ### 2.1 Authentication
-- [ ] Admin login (email + password)
-- [ ] JWT-based session management
-- [ ] Role-based access: Super Admin / Admin / Read-Only
-- [ ] Session timeout (configurable)
-- [ ] Audit log of all admin logins
 
-### 2.2 User Management
-- [ ] Create new user (name, email, company, plan, license key)
-- [ ] View user list (searchable, sortable, paginated)
-- [ ] View user details (profile, license, device, activity log)
-- [ ] Edit user (name, email, plan)
-- [ ] Disable / suspend user (retains data, blocks access)
-- [ ] Delete user (soft-delete, 30-day retention)
-- [ ] View assigned license per user
-- [ ] View device information (hostname, OS, last seen)
+- [x] Admin login with JWT
+- [x] Role-aware UI write restrictions
+- [x] Account password change UI
+- [ ] Configurable session timeout UX
+- [ ] Dedicated login audit view
 
-### 2.3 License Management
-- [ ] Generate new license keys (single or bulk)
-- [ ] Assign license to user
-- [ ] Set expiry date (monthly / yearly / custom)
-- [ ] Extend license expiry (add N days)
-- [ ] Revoke license (immediate, no grace period)
-- [ ] Reset device activation (clears device binding)
-- [ ] View license status (active / expired / revoked / pending)
-- [ ] Filter licenses by: plan, status, device, expiry range
-- [ ] License detail view: key, user, plan, status, device ID, dates
-- [ ] License distribution chart (pie: active vs expired vs revoked)
-- [ ] Activity timeline per license
+### 2.2 Users
+
+- [x] Customer list grouped from license records
+- [x] Search and CSV export
+- [ ] Full create/edit/disable/delete user CRUD separate from license creation
+- [ ] Soft-delete and retention policy
+
+### 2.3 Licenses
+
+- [x] Generate single and bulk license keys
+- [x] Assign license data to customer fields
+- [x] Extend expiry
+- [x] Revoke license
+- [x] Reset device activation
+- [x] Filter by plan, status, device, expiry, company, and search text
+- [x] License detail view and activity timeline
+- [ ] License distribution chart
 
 ### 2.4 Analytics
-- [ ] Total registered users
-- [ ] Active license count
-- [ ] Expired license count
-- [ ] Revoked license count
-- [ ] Licenses expiring in next 30 days
-- [ ] Daily activation chart (last 30 days)
-- [ ] Processing statistics (total videos, success rate, data volume)
-- [ ] Recent activations list
+
+- [x] Total, active, pending, expired, revoked, activations, expiring soon, and plan split
+- [x] CSV exports for licenses and users
+- [ ] Daily activation chart
+- [ ] Processing statistics from desktop history
 - [ ] Top error codes
-- [ ] System performance metrics (CPU, RAM usage)
-- [ ] Export analytics as PDF or CSV
+- [ ] PDF export
 
-### 2.5 Optional Payment Management
-- [ ] Monthly plan management
-- [ ] Yearly plan management
-- [ ] Payment history per user
-- [ ] Invoice generation and download
-- [ ] Payment summary dashboard (MRR, ARR, churn)
-- [ ] Integration: Stripe or Paddle
+### 2.5 Optional Payments
 
----
+- [ ] Select Stripe or Paddle
+- [ ] Payment history
+- [ ] Invoice downloads
+- [ ] MRR/ARR/churn dashboard
+- [ ] Webhook-driven license renewal
 
-## 3. Backend API Requirements
+## 3. Backend API
 
 ### 3.1 License API
-- [ ] POST /api/license/validate — validate key + device
-- [ ] POST /api/license/activate — bind key to device
-- [ ] POST /api/license/renew — extend expiry
-- [ ] POST /api/license/revoke — revoke license (admin only)
-- [ ] POST /api/license/reset-device — clear device binding (admin only)
-- [ ] GET  /api/license/status/:key — get license info
+
+- [x] Validate and activate license keys
+- [x] Renew licenses
+- [x] Revoke licenses
+- [x] Reset device binding
+- [x] Get license status
 
 ### 3.2 Admin API
-- [ ] POST /api/auth/login — admin login
-- [ ] POST /api/auth/refresh — refresh JWT token
-- [ ] GET/POST/PUT/DELETE /api/users — user CRUD
-- [ ] GET/POST/PUT/DELETE /api/licenses — license CRUD
-- [ ] GET /api/analytics — fetch analytics data
-- [ ] GET /api/reports/pdf — generate PDF report
-- [ ] GET /api/reports/csv — export CSV
 
-### 3.3 Security Requirements
-- [ ] All endpoints use HTTPS
-- [ ] JWT authentication on all admin endpoints
-- [ ] Rate limiting on license validation (per IP and per key)
-- [ ] Input validation on all request bodies
-- [ ] No secrets in frontend or desktop app bundles
-- [ ] Audit log all license changes and admin actions
-- [ ] Prevent license key enumeration (timing-safe comparisons)
-- [ ] Device fingerprint stored as hash (never raw hardware data)
+- [x] Login and password change
+- [x] Users list
+- [x] Licenses CRUD-style workflows
+- [x] Package limit management
+- [x] Analytics summary
+- [x] Audit logs
+- [ ] PDF report endpoint
+- [ ] CSV report endpoint separate from admin client-side export
 
----
+### 3.3 Security
 
-## 4. Non-Functional Requirements
+- [x] JWT authentication on admin endpoints
+- [x] Role-aware admin mutations
+- [x] Rate limiting on API app
+- [x] Request validation with Zod
+- [x] Audit logging for license/admin actions
+- [x] Production guard against default JWT secret
+- [ ] HTTPS enforcement at deployment edge
+- [ ] Timing-safe license key comparison review
+
+## 4. Non-Functional Targets
 
 | Requirement | Target |
-|-------------|--------|
-| App startup time | < 5 seconds |
-| License validation response | < 2 seconds |
-| Processing throughput | ≥ 2 parallel workers default |
-| GPU acceleration | Supported (NVENC / AMF / QSV) |
-| Supported OS | Windows 10 / 11 (64-bit) |
-| Offline operation | Full processing, limited to 72h without license check |
+| --- | --- |
+| App startup time | Under 5 seconds |
+| License validation response | Under 2 seconds |
+| Processing throughput | At least 2 workers by default with live queue worker controls |
+| GPU acceleration | Detect NVENC, AMF, and QSV where available; report CPU fallback when unavailable |
+| Supported OS | Windows 10/11 64-bit |
+| Offline operation | Processing allowed within license grace rules |
 | Log retention | 30 days |
-| Database backup | Daily automated backup |
-
----
+| Database backup | Daily automated backup in production |
 
 ## 5. Design Requirements
 
-**Reference files (in `Designs/` folder):**
-- `Designs/License Activation.png` — Activation screen
-- `Designs/Dashboard.png` — Main desktop dashboard
-- `Designs/Admin Dashboard.png` — Admin panel
-- `Designs/License.png` — License management page
+Reference files:
 
-**Color palette:**
+- `Designs/License Activation.png`
+- `Designs/Dashboard.png`
+- `Designs/Admin Dashboard.png`
+- `Designs/License.png`
+
+Palette:
 
 | Token | Value |
-|-------|-------|
+| --- | --- |
 | Primary | `#3B82F6` |
 | Primary Hover | `#2563EB` |
 | Primary Active | `#1D4ED8` |
 | Background | `#0F172A` |
 | Surface | `#1E293B` |
+| Border | `#334155` |
 | Text Primary | `#F8FAFC` |
 | Text Secondary | `#94A3B8` |
 | Success | `#22C55E` |
 | Warning | `#F59E0B` |
 | Error | `#EF4444` |
-
-**Style:** Professional, trustworthy, clean, modern, dark theme

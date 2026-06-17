@@ -1,5 +1,5 @@
 import http from "node:http";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -67,7 +67,11 @@ describe("local worker app", () => {
   it("keeps selected native video paths usable for processing", async () => {
     const folder = mkdtempSync(path.join(os.tmpdir(), "video-reposter-source-"));
     const videoPath = path.join(folder, "clip.mp4");
+    const nestedFolder = path.join(folder, "nested");
+    const nestedVideoPath = path.join(nestedFolder, "nested.mov");
+    mkdirSync(nestedFolder);
     writeFileSync(videoPath, "fake video bytes");
+    writeFileSync(nestedVideoPath, "fake nested video bytes");
     writeFileSync(path.join(folder, "notes.txt"), "not a video");
     const { baseUrl } = await startWorker({
       dialogs: {
@@ -79,19 +83,26 @@ describe("local worker app", () => {
 
     const selectedFiles = await postJson<{ value: Array<{ path: string; name: string }> }>(`${baseUrl}/api/local/files/select-videos`, {});
     expect(selectedFiles.value).toEqual([expect.objectContaining({ path: videoPath, name: "clip.mp4" })]);
-    await expect(postJson(`${baseUrl}/api/local/files/select-video-folder`, {})).resolves.toEqual({
-      value: [expect.objectContaining({ path: videoPath, name: "clip.mp4" })]
-    });
+    const selectedFolder = await postJson<{ value: Array<{ path: string; name: string }> }>(`${baseUrl}/api/local/files/select-video-folder`, {});
+    expect(selectedFolder.value).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: videoPath, name: "clip.mp4" }),
+      expect.objectContaining({ path: nestedVideoPath, name: "nested.mov" })
+    ]));
+    expect(selectedFolder.value).toHaveLength(2);
 
     await expect(
       postJson(`${baseUrl}/api/local/processing/start-file`, {
         inputPath: selectedFiles.value[0].path,
-        presetId: "instagram-reel"
+        presetId: "instagram-reel",
+        outputNaming: {
+          template: "{preset}_{name}",
+          format: "mkv"
+        }
       })
     ).resolves.toEqual({
       value: expect.objectContaining({
         ok: true,
-        outputPath: expect.stringContaining("clip_instagram-reel_processed.mp4")
+        outputPath: expect.stringContaining("instagram-reel_clip.mkv")
       })
     });
   });

@@ -6,10 +6,10 @@ import { appendProcessingLog, getProcessingLogPath } from "./processingLog.js";
 import { ProcessingService } from "./processingService.js";
 import { getStableDeviceId, readLicenseCache, writeLicenseCache } from "./licenseCache.js";
 import { isLicenseKey, normalizeLicenseKey, stateFromCache } from "../shared/license.js";
-import { buildFfmpegCommand, isSupportedVideoPath, platformPresets } from "../shared/processing.js";
+import { buildFfmpegCommand, isSupportedVideoPath, platformPresets, renderOutputFileName } from "../shared/processing.js";
 import { invalidVideoFailure, outputFolderFailure } from "../shared/processingFailure.js";
 import type { DeviceInfo } from "../shared/license.js";
-import type { FfmpegJob, ImportedVideoFile, TransformSettings } from "../shared/processing.js";
+import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, TransformSettings } from "../shared/processing.js";
 import type { ProcessingJobRequest, ProcessingUpdate } from "./processingService.js";
 
 export type NativeDialogs = {
@@ -169,7 +169,7 @@ export function createLocalWorkerApp(options: LocalWorkerAppOptions) {
 
   api.post("/api/local/processing/start-file", async (req, res, next) => {
     try {
-      const body = req.body as { inputPath?: unknown; presetId?: unknown; outputDir?: unknown; transforms?: TransformSettings };
+      const body = req.body as { inputPath?: unknown; presetId?: unknown; outputDir?: unknown; transforms?: TransformSettings; outputNaming?: OutputNamingOptions };
       const inputPath = String(body.inputPath ?? "");
       const presetId = String(body.presetId ?? "instagram-reel");
       const preset = platformPresets.find((item) => item.id === presetId) ?? platformPresets.find((item) => item.id === "instagram-reel");
@@ -177,7 +177,7 @@ export function createLocalWorkerApp(options: LocalWorkerAppOptions) {
       const outputDir = typeof body.outputDir === "string" ? body.outputDir : undefined;
       let outputPath: string;
       try {
-        outputPath = getDefaultOutputPath(inputPath, preset.id, outputDir);
+        outputPath = getDefaultOutputPath(inputPath, preset.id, outputDir, body.outputNaming);
       } catch (error) {
         const failure = outputFolderFailure(`Could not create output folder: ${error instanceof Error ? error.message : String(error)}`);
         res.json({ value: { ok: false, message: failure.message, failure } });
@@ -340,11 +340,11 @@ function getVideoFilesInFolder(folderPath: string) {
   return getImportedVideoFiles(files);
 }
 
-function getDefaultOutputPath(inputPath: string, presetId: string, selectedOutputDir?: string) {
+function getDefaultOutputPath(inputPath: string, presetId: string, selectedOutputDir?: string, outputNaming?: OutputNamingOptions) {
   const parsed = path.parse(inputPath);
   const outputDir = selectedOutputDir?.trim() ? selectedOutputDir : path.join(parsed.dir, "VideoReposterOutput");
   mkdirSync(outputDir, { recursive: true });
-  return path.join(outputDir, `${parsed.name}_${presetId}_processed.mp4`);
+  return path.join(outputDir, renderOutputFileName(inputPath, presetId, outputNaming));
 }
 
 function broadcast(clients: Set<EventClient>, update: ProcessingUpdate) {

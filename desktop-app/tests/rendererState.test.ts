@@ -12,6 +12,7 @@ import {
   getNewBatchItems,
   getPresetAccess,
   getProcessingActionState,
+  getWorkerPoolState,
   importSourceLabel,
   isNewBatchLocked,
   queueStatusLabel,
@@ -91,6 +92,10 @@ describe("renderer state persistence", () => {
         selectedPresetId: "not-real",
         outputDir: "C:/Output",
         maxWorkers: 99,
+        outputNaming: {
+          template: "  {preset}:{name}?  ",
+          format: "mkv"
+        },
         transforms: {
           brightness: 500,
           contrast: -500,
@@ -98,7 +103,17 @@ describe("renderer state persistence", () => {
           sharpness: 999,
           volume: -20,
           scalePercent: 999,
+          cropPercent: 999,
           rotateDegrees: 45,
+          customRotateDegrees: -999,
+          textWatermark: "  Brand  ",
+          logoWatermarkPath: "  C:/brand/logo.png  ",
+          watermarkPosition: "top-right",
+          replaceAudioPath: "  C:/audio/track.mp3  ",
+          pitchSemitones: 99,
+          speedPercent: 5,
+          fadeInSeconds: 99,
+          fadeOutSeconds: -2,
           mirrorHorizontal: true
         }
       })
@@ -108,17 +123,31 @@ describe("renderer state persistence", () => {
       defaultPresetId: defaultPreferences.defaultPresetId,
       outputDir: "C:/Output",
       maxWorkers: 4,
+      outputNaming: {
+        template: "{preset}:{name}?",
+        format: "mkv"
+      },
       transforms: {
         mirrorHorizontal: true,
         mirrorVertical: undefined,
         removeAudio: undefined,
         rotateDegrees: undefined,
+        customRotateDegrees: -180,
         scalePercent: 200,
+        cropPercent: 40,
         brightness: 50,
         contrast: -50,
         saturation: 0,
         sharpness: 100,
-        volume: 0
+        textWatermark: "Brand",
+        logoWatermarkPath: "C:/brand/logo.png",
+        watermarkPosition: "top-right",
+        replaceAudioPath: "C:/audio/track.mp3",
+        volume: 0,
+        pitchSemitones: 12,
+        speedPercent: 50,
+        fadeInSeconds: 10,
+        fadeOutSeconds: 0
       }
     });
   });
@@ -129,6 +158,10 @@ describe("renderer state persistence", () => {
         selectedPresetId: "facebook-reel",
         outputDir: "",
         maxWorkers: 2,
+        outputNaming: {
+          template: "",
+          format: "bad"
+        },
         transforms: {}
       })
     });
@@ -142,6 +175,10 @@ describe("renderer state persistence", () => {
       defaultPresetId: "tiktok",
       outputDir: "C:/Output",
       maxWorkers: 3,
+      outputNaming: {
+        template: "{name}_{preset}",
+        format: "mov"
+      },
       transforms: { volume: 80 }
     };
     const history: HistoryItem[] = Array.from({ length: 55 }, (_, index) => ({
@@ -238,6 +275,26 @@ describe("renderer state persistence", () => {
     });
   });
 
+  it("summarizes worker pool slots within package limits", () => {
+    const queued: QueueItem = { id: "queued", path: "C:/queued.mp4", name: "queued.mp4", size: 10, progress: 0, status: "queued" };
+    const paused: QueueItem = { ...queued, id: "paused", status: "paused" };
+    const processing: QueueItem = { ...queued, id: "processing", status: "processing", processingJobId: "job-1" };
+    const starting: QueueItem = { ...queued, id: "starting", status: "starting", processingJobId: "job-2" };
+
+    expect(getWorkerPoolState([queued, paused, processing, starting], 8, 3)).toEqual({
+      activeCount: 2,
+      queuedCount: 2,
+      maxWorkers: 3,
+      workerLimit: 3,
+      availableSlots: 1,
+      saturated: false
+    });
+    expect(getWorkerPoolState([queued, processing, starting], 2, 4)).toEqual(expect.objectContaining({
+      availableSlots: 0,
+      saturated: true
+    }));
+  });
+
   it("blocks Start for unavailable processing, invalid imports, and terminal queue items", () => {
     const invalid: QueueItem = { id: "invalid", name: "browser-preview.mp4", size: 10, progress: 0, status: "queued" };
     const complete: QueueItem = { id: "complete", path: "C:/done.mp4", name: "done.mp4", size: 10, progress: 100, status: "complete" };
@@ -315,17 +372,26 @@ describe("renderer state persistence", () => {
       defaultPresetId: "youtube-short",
       outputDir: "C:/Default Output",
       maxWorkers: 3,
+      outputNaming: {
+        template: "{preset}_{name}",
+        format: "mkv"
+      },
       transforms: {}
     };
 
     const currentBatch = currentBatchSettingsFromPreferences(preferences, 2);
     preferences.outputDir = "C:/Changed Default";
     preferences.maxWorkers = 1;
+    preferences.outputNaming.template = "changed";
 
     expect(currentBatch).toEqual({
       presetId: "youtube-short",
       outputDir: "C:/Default Output",
-      maxWorkers: 2
+      maxWorkers: 2,
+      outputNaming: {
+        template: "{preset}_{name}",
+        format: "mkv"
+      }
     });
   });
 
@@ -336,12 +402,26 @@ describe("renderer state persistence", () => {
       defaultPresetId: "youtube-short",
       outputDir: "",
       maxWorkers: 1,
+      outputNaming: {
+        template: "{name}_{preset}_processed",
+        format: "mp4"
+      },
       transforms: {
         scalePercent: 100,
+        cropPercent: 0,
         brightness: 0,
         contrast: 0,
         saturation: 0,
         sharpness: 0,
+        customRotateDegrees: 0,
+        textWatermark: "",
+        logoWatermarkPath: "",
+        watermarkPosition: "bottom-right",
+        replaceAudioPath: "",
+        pitchSemitones: 0,
+        speedPercent: 100,
+        fadeInSeconds: 0,
+        fadeOutSeconds: 0,
         volume: 100
       }
     });
@@ -352,6 +432,7 @@ describe("renderer state persistence", () => {
 
   it("summarizes non-default transforms", () => {
     expect(summarizeTransforms({ mirrorHorizontal: true, rotateDegrees: 90, scalePercent: 125, volume: 80 })).toBe("mirror, 90 deg, scale 125%, volume");
+    expect(summarizeTransforms({ cropPercent: 10, textWatermark: "Brand", replaceAudioPath: "C:/audio/track.mp3", speedPercent: 125 })).toBe("crop 10%, text watermark, audio replaced, speed 125%");
     expect(summarizeTransforms({ brightness: 0, volume: 100 })).toBeUndefined();
   });
 

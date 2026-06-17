@@ -8,6 +8,7 @@
     "dev": "npm run build && concurrently -n renderer,electron -c cyan,magenta \"vite --host 127.0.0.1 --port 5173\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "browser": "npm run build && electron dist-electron/main/browserWorker.js",
     "build": "tsc -p tsconfig.electron.json && vite build",
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.json --noEmit",
     "dist": "npm run build && electron-builder --win nsis portable",
     "preview": "vite preview --host 127.0.0.1 --port 5173",
     "test": "vitest run"
@@ -83,19 +84,19 @@
     "ffprobe-static": "^3.1.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^5.1.0",
     "@types/express": "^5.0.5",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "concurrently": "^9.2.1",
+    "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^10.0.3",
     "electron": "^39.2.4",
     "electron-builder": "^26.8.1",
     "lucide-react": "^0.554.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "typescript": "^5.9.3",
-    "vite": "^7.2.4",
+    "vite": "^8.0.16",
     "vitest": "^4.0.8",
     "wait-on": "^9.0.3"
   }

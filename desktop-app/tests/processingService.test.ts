@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
-import { ProcessingService } from "../src/main/processingService.js";
+import { parseHardwareAcceleration, ProcessingService } from "../src/main/processingService.js";
 import type { ProcessingUpdate } from "../src/main/processingService.js";
 
 class FakeStream extends EventEmitter {
@@ -64,21 +64,48 @@ describe("ProcessingService", () => {
   });
 
   it("reports ffmpeg availability from version output", async () => {
-    const fake = new FakeProcess();
+    const versionProcess = new FakeProcess();
+    const encodersProcess = new FakeProcess();
     const service = new ProcessingService(() => undefined, ((command, args) => {
       expect(command).toBe("ffmpeg");
-      expect(args).toEqual(["-version"]);
+      if (args[0] === "-version") {
+        queueMicrotask(() => {
+          versionProcess.stdout.emit("data", "ffmpeg version 7.0\ncopyright");
+          versionProcess.emit("close", 0, null);
+        });
+        return versionProcess;
+      }
+      expect(args).toEqual(["-hide_banner", "-encoders"]);
       queueMicrotask(() => {
-        fake.stdout.emit("data", "ffmpeg version 7.0\ncopyright");
-        fake.emit("close", 0, null);
+        encodersProcess.stdout.emit("data", " V....D h264_nvenc NVIDIA NVENC H.264 encoder\n V....D h264_qsv H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (Intel Quick Sync Video acceleration)");
+        encodersProcess.emit("close", 0, null);
       });
-      return fake;
+      return encodersProcess;
     }) as never);
 
     await expect(service.checkFfmpeg()).resolves.toEqual({
       available: true,
       message: "Video processing is ready.",
-      technicalMessage: "ffmpeg version 7.0"
+      technicalMessage: "ffmpeg version 7.0",
+      hardwareAcceleration: {
+        available: true,
+        encoders: ["h264_nvenc", "h264_qsv"],
+        message: "GPU acceleration available: NVIDIA NVENC, Intel Quick Sync."
+      }
+    });
+  });
+
+  it("parses hardware encoder support and reports CPU fallback", () => {
+    expect(parseHardwareAcceleration(" V....D h264_amf AMD AMF H.264 encoder")).toEqual({
+      available: true,
+      encoders: ["h264_amf"],
+      message: "GPU acceleration available: AMD AMF."
+    });
+    expect(parseHardwareAcceleration(" V....D libx264 libx264 H.264 encoder")).toEqual({
+      available: false,
+      encoders: [],
+      message: "CPU encoding fallback is active.",
+      technicalMessage: "No supported H.264 GPU encoders reported by FFmpeg."
     });
   });
 

@@ -1,6 +1,12 @@
 export type PlatformPresetId = "instagram-reel" | "youtube-short" | "tiktok" | "twitter-video" | "facebook-reel";
 
 export type VideoCodec = "libx264" | "libx265" | "h264_nvenc" | "h264_amf" | "h264_qsv";
+export type OutputFormat = "mp4" | "mkv" | "mov";
+
+export type OutputNamingOptions = {
+  template?: string;
+  format?: OutputFormat;
+};
 
 export type OutputSettings = {
   width: number;
@@ -19,14 +25,26 @@ export type TransformSettings = {
   mirrorHorizontal?: boolean;
   mirrorVertical?: boolean;
   scalePercent?: number;
+  cropPercent?: number;
   brightness?: number;
   contrast?: number;
   saturation?: number;
   sharpness?: number;
   rotateDegrees?: 90 | 180 | 270;
+  customRotateDegrees?: number;
+  textWatermark?: string;
+  logoWatermarkPath?: string;
+  watermarkPosition?: WatermarkPosition;
   removeAudio?: boolean;
+  replaceAudioPath?: string;
   volume?: number;
+  pitchSemitones?: number;
+  speedPercent?: number;
+  fadeInSeconds?: number;
+  fadeOutSeconds?: number;
 };
+
+export type WatermarkPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center";
 
 export type FfmpegJob = {
   inputPath: string;
@@ -49,6 +67,8 @@ export type ImportedVideoFile = {
 };
 
 export const supportedVideoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv"] as const;
+export const supportedOutputFormats: OutputFormat[] = ["mp4", "mkv", "mov"];
+export const defaultOutputNamingTemplate = "{name}_{preset}_processed";
 
 export const platformPresets: PlatformPreset[] = [
   {
@@ -82,16 +102,32 @@ export function buildFfmpegArgs(job: FfmpegJob) {
   const output = normalizeOutputSettings(job.output);
   const transforms = job.transforms ?? {};
   const args = ["-i", job.inputPath];
+  const replacementAudioPath = transforms.removeAudio ? undefined : normalizeOptionalPath(transforms.replaceAudioPath);
+  if (replacementAudioPath) args.push("-i", replacementAudioPath);
+
+  const logoWatermarkPath = normalizeOptionalPath(transforms.logoWatermarkPath);
+  const logoInputIndex = logoWatermarkPath ? (replacementAudioPath ? 2 : 1) : undefined;
+  if (logoWatermarkPath) args.push("-i", logoWatermarkPath);
 
   if (output.maxDurationSeconds) args.push("-t", String(output.maxDurationSeconds));
 
   const videoFilters = buildVideoFilters(output, transforms);
-  if (videoFilters.length) args.push("-vf", videoFilters.join(","));
+  if (logoInputIndex) {
+    args.push("-filter_complex", buildLogoWatermarkGraph(videoFilters, logoInputIndex, transforms.watermarkPosition), "-map", "[vout]");
+  } else {
+    if (videoFilters.length) args.push("-vf", videoFilters.join(","));
+    if (replacementAudioPath) args.push("-map", "0:v:0");
+  }
 
   const audioFilters = buildAudioFilters(output, transforms);
   if (transforms.removeAudio) {
     args.push("-an");
   } else {
+    if (replacementAudioPath) {
+      args.push("-map", "1:a:0", "-shortest");
+    } else if (logoInputIndex) {
+      args.push("-map", "0:a:0?");
+    }
     if (audioFilters.length) args.push("-af", audioFilters.join(","));
     args.push("-c:a", "aac", "-b:a", output.audioBitrate);
   }
@@ -122,6 +158,23 @@ export function isSupportedVideoPath(filePath: string) {
   return supportedVideoExtensions.some((extension) => lower.endsWith(extension));
 }
 
+export function normalizeOutputNamingOptions(options?: OutputNamingOptions): Required<OutputNamingOptions> {
+  return {
+    template: normalizeOutputTemplate(options?.template),
+    format: supportedOutputFormats.includes(options?.format as OutputFormat) ? (options!.format as OutputFormat) : "mp4"
+  };
+}
+
+export function renderOutputFileName(inputPath: string, presetId: string, options?: OutputNamingOptions) {
+  const naming = normalizeOutputNamingOptions(options);
+  const baseName = fileNameWithoutExtension(inputPath);
+  const rendered = naming.template
+    .replaceAll("{name}", baseName)
+    .replaceAll("{preset}", presetId)
+    .replaceAll("{date}", formatDateToken(new Date()));
+  return `${sanitizeFileName(rendered) || sanitizeFileName(baseName) || "video"}.${naming.format}`;
+}
+
 export function parseFfmpegProgress(line: string, totalDurationSeconds: number) {
   if (totalDurationSeconds <= 0) return null;
   const match = line.match(/time=(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/);
@@ -146,6 +199,33 @@ function normalizeOutputSettings(output: OutputSettings): Required<Pick<OutputSe
   };
 }
 
+function normalizeOutputTemplate(value?: string) {
+  const trimmed = value?.trim();
+  return trimmed || defaultOutputNamingTemplate;
+}
+
+function fileNameWithoutExtension(filePath: string) {
+  const normalized = filePath.replaceAll("\\", "/");
+  const fileName = normalized.split("/").pop() ?? filePath;
+  const dotIndex = fileName.lastIndexOf(".");
+  return dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+}
+
+function sanitizeFileName(value: string) {
+  return value
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 180);
+}
+
+function formatDateToken(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
+}
+
 function buildVideoFilters(output: OutputSettings, transforms: TransformSettings) {
   const scalePercent = typeof transforms.scalePercent === "number" ? transforms.scalePercent : 100;
   const filters =
@@ -164,10 +244,19 @@ function buildVideoFilters(output: OutputSettings, transforms: TransformSettings
   if (transforms.mirrorHorizontal) filters.push("hflip");
   if (transforms.mirrorVertical) filters.push("vflip");
   if (transforms.rotateDegrees) filters.push(...rotateFilters(transforms.rotateDegrees));
+  if (transforms.customRotateDegrees) filters.push(`rotate=${toFixed(transforms.customRotateDegrees)}*PI/180:fillcolor=black`);
+  if (transforms.cropPercent && transforms.cropPercent > 0) {
+    const cropScale = toFixed(1 - transforms.cropPercent / 100);
+    filters.push(`crop=iw*${cropScale}:ih*${cropScale}:(iw-ow)/2:(ih-oh)/2`, `scale=${output.width}:${output.height}`);
+  }
 
   const eq = buildEqFilter(transforms);
   if (eq) filters.push(eq);
   if (transforms.sharpness && transforms.sharpness > 0) filters.push(`unsharp=5:5:${toFixed(transforms.sharpness / 20)}:5:5:0`);
+  if (transforms.textWatermark?.trim()) {
+    const position = watermarkCoordinates(transforms.watermarkPosition);
+    filters.push(`drawtext=text='${escapeFilterText(transforms.textWatermark.trim())}':${position}:fontcolor=white:fontsize=36:box=1:boxcolor=black@0.45:boxborderw=12`);
+  }
 
   return filters;
 }
@@ -176,6 +265,15 @@ function buildAudioFilters(output: OutputSettings, transforms: TransformSettings
   const filters = [];
   if (output.normalizeAudio) filters.push("loudnorm=I=-16:LRA=11:TP=-1.5");
   if (typeof transforms.volume === "number" && transforms.volume !== 100) filters.push(`volume=${toFixed(transforms.volume / 100)}`);
+  if (typeof transforms.pitchSemitones === "number" && transforms.pitchSemitones !== 0) {
+    const pitchFactor = Math.pow(2, transforms.pitchSemitones / 12);
+    filters.push(`asetrate=44100*${toFixed(pitchFactor)}`, "aresample=44100", `atempo=${toFixed(1 / pitchFactor)}`);
+  }
+  if (typeof transforms.speedPercent === "number" && transforms.speedPercent !== 100) filters.push(...atempoFilters(transforms.speedPercent / 100));
+  if (transforms.fadeInSeconds && transforms.fadeInSeconds > 0) filters.push(`afade=t=in:st=0:d=${transforms.fadeInSeconds}`);
+  if (transforms.fadeOutSeconds && transforms.fadeOutSeconds > 0 && output.maxDurationSeconds) {
+    filters.push(`afade=t=out:st=${Math.max(0, output.maxDurationSeconds - transforms.fadeOutSeconds)}:d=${transforms.fadeOutSeconds}`);
+  }
   return filters;
 }
 
@@ -197,6 +295,43 @@ function rotateFilters(degrees: 90 | 180 | 270) {
   if (degrees === 90) return ["transpose=1"];
   if (degrees === 270) return ["transpose=2"];
   return ["transpose=1", "transpose=1"];
+}
+
+function buildLogoWatermarkGraph(videoFilters: string[], logoInputIndex: number, position: WatermarkPosition = "bottom-right") {
+  const baseFilters = videoFilters.length ? videoFilters.join(",") : "null";
+  return `[0:v]${baseFilters}[base];[${logoInputIndex}:v]scale=180:-1[logo];[base][logo]overlay=${watermarkCoordinates(position)}[vout]`;
+}
+
+function watermarkCoordinates(position: WatermarkPosition = "bottom-right") {
+  if (position === "top-left") return "x=24:y=24";
+  if (position === "top-right") return "x=W-w-24:y=24";
+  if (position === "bottom-left") return "x=24:y=H-h-24";
+  if (position === "center") return "x=(W-w)/2:y=(H-h)/2";
+  return "x=W-w-24:y=H-h-24";
+}
+
+function atempoFilters(speed: number) {
+  let remaining = Math.min(4, Math.max(0.25, speed));
+  const filters: string[] = [];
+  while (remaining > 2) {
+    filters.push("atempo=2");
+    remaining /= 2;
+  }
+  while (remaining < 0.5) {
+    filters.push("atempo=0.5");
+    remaining /= 0.5;
+  }
+  filters.push(`atempo=${toFixed(remaining)}`);
+  return filters;
+}
+
+function normalizeOptionalPath(value?: string) {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
+
+function escapeFilterText(value: string) {
+  return value.replaceAll("\\", "\\\\").replaceAll("'", "\\'").replaceAll(":", "\\:").replaceAll(",", "\\,");
 }
 
 function encoderPresetArgs(output: Required<Pick<OutputSettings, "crf" | "preset">> & OutputSettings) {

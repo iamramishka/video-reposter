@@ -1,5 +1,5 @@
-import { platformPresets } from "../shared/processing";
-import type { ImportedVideoFile, PlatformPreset, TransformSettings } from "../shared/processing";
+import { defaultOutputNamingTemplate, normalizeOutputNamingOptions, platformPresets, supportedOutputFormats } from "../shared/processing";
+import type { ImportedVideoFile, OutputFormat, OutputNamingOptions, PlatformPreset, TransformSettings } from "../shared/processing";
 import { processingFailureMessages } from "../shared/processingFailure";
 import type { ProcessingFailure } from "../shared/processingFailure";
 
@@ -58,6 +58,7 @@ export type ProcessingPreferences = {
   defaultPresetId: string;
   outputDir: string;
   maxWorkers: number;
+  outputNaming: Required<OutputNamingOptions>;
   transforms: TransformSettings;
 };
 
@@ -65,16 +66,36 @@ export type CurrentBatchSettings = {
   presetId: string;
   outputDir: string;
   maxWorkers: number;
+  outputNaming: Required<OutputNamingOptions>;
+};
+
+export type WorkerPoolState = {
+  activeCount: number;
+  queuedCount: number;
+  maxWorkers: number;
+  workerLimit: number;
+  availableSlots: number;
+  saturated: boolean;
 };
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 
 export const defaultTransforms: TransformSettings = {
   scalePercent: 100,
+  cropPercent: 0,
   brightness: 0,
   contrast: 0,
   saturation: 0,
   sharpness: 0,
+  customRotateDegrees: 0,
+  textWatermark: "",
+  logoWatermarkPath: "",
+  watermarkPosition: "bottom-right",
+  replaceAudioPath: "",
+  pitchSemitones: 0,
+  speedPercent: 100,
+  fadeInSeconds: 0,
+  fadeOutSeconds: 0,
   volume: 100
 };
 
@@ -82,6 +103,10 @@ export const defaultPreferences: ProcessingPreferences = {
   defaultPresetId: "instagram-reel",
   outputDir: "",
   maxWorkers: 2,
+  outputNaming: {
+    template: defaultOutputNamingTemplate,
+    format: "mp4"
+  },
   transforms: defaultTransforms
 };
 
@@ -96,13 +121,23 @@ export function cleanTransforms(transforms: TransformSettings): TransformSetting
     mirrorHorizontal: transforms.mirrorHorizontal || undefined,
     mirrorVertical: transforms.mirrorVertical || undefined,
     rotateDegrees: transforms.rotateDegrees,
+    customRotateDegrees: transforms.customRotateDegrees ? transforms.customRotateDegrees : undefined,
     removeAudio: transforms.removeAudio || undefined,
     scalePercent: transforms.scalePercent && transforms.scalePercent !== 100 ? transforms.scalePercent : undefined,
+    cropPercent: transforms.cropPercent ? transforms.cropPercent : undefined,
     brightness: transforms.brightness ? transforms.brightness : undefined,
     contrast: transforms.contrast ? transforms.contrast : undefined,
     saturation: transforms.saturation ? transforms.saturation : undefined,
     sharpness: transforms.sharpness ? transforms.sharpness : undefined,
-    volume: transforms.removeAudio || transforms.volume === 100 ? undefined : transforms.volume
+    textWatermark: trimOrUndefined(transforms.textWatermark),
+    logoWatermarkPath: trimOrUndefined(transforms.logoWatermarkPath),
+    watermarkPosition: trimOrUndefined(transforms.textWatermark) || trimOrUndefined(transforms.logoWatermarkPath) ? transforms.watermarkPosition : undefined,
+    replaceAudioPath: transforms.removeAudio ? undefined : trimOrUndefined(transforms.replaceAudioPath),
+    volume: transforms.removeAudio || transforms.volume === 100 ? undefined : transforms.volume,
+    pitchSemitones: transforms.removeAudio || !transforms.pitchSemitones ? undefined : transforms.pitchSemitones,
+    speedPercent: transforms.removeAudio || transforms.speedPercent === 100 ? undefined : transforms.speedPercent,
+    fadeInSeconds: transforms.removeAudio || !transforms.fadeInSeconds ? undefined : transforms.fadeInSeconds,
+    fadeOutSeconds: transforms.removeAudio || !transforms.fadeOutSeconds ? undefined : transforms.fadeOutSeconds
   };
 }
 
@@ -112,13 +147,21 @@ export function summarizeTransforms(transforms: TransformSettings) {
     cleaned.mirrorHorizontal ? "mirror" : "",
     cleaned.mirrorVertical ? "flip" : "",
     cleaned.rotateDegrees ? `${cleaned.rotateDegrees} deg` : "",
+    cleaned.customRotateDegrees ? `rotate ${cleaned.customRotateDegrees} deg` : "",
     cleaned.removeAudio ? "muted" : "",
     cleaned.scalePercent ? `scale ${cleaned.scalePercent}%` : "",
+    cleaned.cropPercent ? `crop ${cleaned.cropPercent}%` : "",
     cleaned.brightness ? "brightness" : "",
     cleaned.contrast ? "contrast" : "",
     cleaned.saturation ? "saturation" : "",
     cleaned.sharpness ? "sharpness" : "",
-    cleaned.volume ? "volume" : ""
+    cleaned.textWatermark ? "text watermark" : "",
+    cleaned.logoWatermarkPath ? "logo watermark" : "",
+    cleaned.replaceAudioPath ? "audio replaced" : "",
+    cleaned.volume ? "volume" : "",
+    cleaned.pitchSemitones ? "pitch" : "",
+    cleaned.speedPercent ? `speed ${cleaned.speedPercent}%` : "",
+    cleaned.fadeInSeconds || cleaned.fadeOutSeconds ? "fade" : ""
   ].filter(Boolean);
   return labels.length ? labels.join(", ") : undefined;
 }
@@ -216,7 +259,25 @@ export function currentBatchSettingsFromPreferences(preferences: ProcessingPrefe
   return {
     presetId: preferences.defaultPresetId,
     outputDir: preferences.outputDir,
-    maxWorkers: Math.min(preferences.maxWorkers, workerLimit)
+    maxWorkers: Math.min(preferences.maxWorkers, workerLimit),
+    outputNaming: { ...preferences.outputNaming }
+  };
+}
+
+export function getWorkerPoolState(items: QueueItem[], maxWorkers: unknown, workerLimit = 4): WorkerPoolState {
+  const nextWorkerLimit = clampWorkers(workerLimit);
+  const nextMaxWorkers = Math.min(clampWorkers(maxWorkers), nextWorkerLimit);
+  const activeCount = items.filter((item) => item.status === "processing" || item.status === "starting").length;
+  const queuedCount = items.filter((item) => (item.status === "queued" || item.status === "paused") && Boolean(item.path)).length;
+  const availableSlots = Math.max(0, nextMaxWorkers - activeCount);
+
+  return {
+    activeCount,
+    queuedCount,
+    maxWorkers: nextMaxWorkers,
+    workerLimit: nextWorkerLimit,
+    availableSlots,
+    saturated: activeCount >= nextMaxWorkers && queuedCount > 0
   };
 }
 
@@ -225,6 +286,7 @@ export function restoredDefaultPreferences(workerLimit = 4, fallbackPresetId = d
     ...defaultPreferences,
     maxWorkers: Math.min(defaultPreferences.maxWorkers, workerLimit),
     defaultPresetId: fallbackPresetId,
+    outputNaming: { ...defaultPreferences.outputNaming },
     transforms: { ...defaultTransforms }
   };
 }
@@ -259,6 +321,14 @@ export function formatDuration(seconds?: number) {
 export function formatVideoFormat(path?: string, codec?: string) {
   const extension = path?.split(".").pop()?.toUpperCase();
   return [extension, codec?.toUpperCase()].filter(Boolean).join(" · ") || "Unknown format";
+}
+
+export function sanitizeOutputNaming(value: unknown): Required<OutputNamingOptions> {
+  const naming = value && typeof value === "object" ? value as OutputNamingOptions : {};
+  return normalizeOutputNamingOptions({
+    template: sanitizeNamingTemplate(naming.template),
+    format: supportedOutputFormats.includes(naming.format as OutputFormat) ? naming.format : undefined
+  });
 }
 
 export function loadHistory(storage = getStorage()): HistoryItem[] {
@@ -297,6 +367,7 @@ export function loadPreferences(storage = getStorage()): ProcessingPreferences {
           : defaultPreferences.defaultPresetId,
       outputDir: typeof parsed.outputDir === "string" ? parsed.outputDir : "",
       maxWorkers: clampWorkers(parsed.maxWorkers),
+      outputNaming: sanitizeOutputNaming(parsed.outputNaming),
       transforms: sanitizeTransforms(parsed.transforms)
     };
   } catch {
@@ -357,12 +428,22 @@ export function sanitizeTransforms(value: unknown): TransformSettings {
     mirrorVertical: Boolean(transforms.mirrorVertical) || undefined,
     removeAudio: Boolean(transforms.removeAudio) || undefined,
     rotateDegrees: transforms.rotateDegrees === 90 || transforms.rotateDegrees === 180 || transforms.rotateDegrees === 270 ? transforms.rotateDegrees : undefined,
+    customRotateDegrees: clampNumber(transforms.customRotateDegrees, -180, 180, 0),
     scalePercent: clampNumber(transforms.scalePercent, 100, 200, 100),
+    cropPercent: clampNumber(transforms.cropPercent, 0, 40, 0),
     brightness: clampNumber(transforms.brightness, -50, 50, 0),
     contrast: clampNumber(transforms.contrast, -50, 50, 0),
     saturation: clampNumber(transforms.saturation, -50, 50, 0),
     sharpness: clampNumber(transforms.sharpness, 0, 100, 0),
-    volume: clampNumber(transforms.volume, 0, 150, 100)
+    textWatermark: sanitizeText(transforms.textWatermark, 80),
+    logoWatermarkPath: sanitizeText(transforms.logoWatermarkPath, 260),
+    watermarkPosition: sanitizeWatermarkPosition(transforms.watermarkPosition),
+    replaceAudioPath: sanitizeText(transforms.replaceAudioPath, 260),
+    volume: clampNumber(transforms.volume, 0, 150, 100),
+    pitchSemitones: clampNumber(transforms.pitchSemitones, -12, 12, 0),
+    speedPercent: clampNumber(transforms.speedPercent, 50, 200, 100),
+    fadeInSeconds: clampNumber(transforms.fadeInSeconds, 0, 10, 0),
+    fadeOutSeconds: clampNumber(transforms.fadeOutSeconds, 0, 10, 0)
   };
 }
 
@@ -416,6 +497,25 @@ function sanitizeQueueFailure(value: unknown): QueueFailure | undefined {
     return { code, message: processingFailureMessages.processingFailed, retryable: true, recovery: "retry_support" };
   }
   return undefined;
+}
+
+function sanitizeText(value: unknown, maxLength: number) {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function sanitizeNamingTemplate(value: unknown) {
+  const trimmed = typeof value === "string" ? value.trim().slice(0, 120) : "";
+  return trimmed || defaultOutputNamingTemplate;
+}
+
+function trimOrUndefined(value?: string) {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
+
+function sanitizeWatermarkPosition(value: unknown): TransformSettings["watermarkPosition"] {
+  if (value === "top-left" || value === "top-right" || value === "bottom-left" || value === "bottom-right" || value === "center") return value;
+  return "bottom-right";
 }
 
 function getStorage(): StorageLike | undefined {

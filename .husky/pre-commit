@@ -1,0 +1,2 @@
+#!/usr/bin/env sh
+powershell -ExecutionPolicy Bypass -File .claude/hooks/pre-commit-guard.ps1 -Mode PreCommit

@@ -92,3 +92,9 @@ Reports/*.csv
 desktop-app/.electron-builder-effective-config.yaml
 
 .vercel
+
+# Claude Code local overrides
+.claude/settings.local.json
+
+# Husky generated install shims
+.husky/_/

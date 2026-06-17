@@ -10,10 +10,10 @@ import { ProcessingService } from "./processingService.js";
 import { getStableDeviceId, readLicenseCache, writeLicenseCache } from "./licenseCache.js";
 import { isLicenseKey, normalizeLicenseKey, stateFromCache } from "../shared/license.js";
 import { productName } from "../shared/branding.js";
-import { buildFfmpegCommand, isSupportedVideoPath, platformPresets } from "../shared/processing.js";
+import { buildFfmpegCommand, isSupportedVideoPath, platformPresets, renderOutputFileName } from "../shared/processing.js";
 import { invalidVideoFailure, outputFolderFailure } from "../shared/processingFailure.js";
 import type { ProcessingJobRequest } from "./processingService.js";
-import type { FfmpegJob, ImportedVideoFile, TransformSettings } from "../shared/processing.js";
+import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, TransformSettings } from "../shared/processing.js";
 
 const serverUrl = process.env.VITE_LICENSE_SERVER_URL ?? "https://video-reposter.vercel.app";
 const licenseClient = new LicenseClient(serverUrl);
@@ -117,11 +117,11 @@ function getVideoFilesInFolder(folderPath: string) {
   return getImportedVideoFiles(files);
 }
 
-function getDefaultOutputPath(inputPath: string, presetId: string, selectedOutputDir?: string) {
+function getDefaultOutputPath(inputPath: string, presetId: string, selectedOutputDir?: string, outputNaming?: OutputNamingOptions) {
   const parsed = path.parse(inputPath);
   const outputDir = selectedOutputDir?.trim() ? selectedOutputDir : path.join(parsed.dir, "VideoReposterOutput");
   mkdirSync(outputDir, { recursive: true }); // may throw — caller wraps in try-catch
-  return path.join(outputDir, `${parsed.name}_${presetId}_processed.mp4`);
+  return path.join(outputDir, renderOutputFileName(inputPath, presetId, outputNaming));
 }
 
 function showOpenDialogWithParent(event: IpcMainInvokeEvent, options: OpenDialogOptions) {
@@ -186,12 +186,12 @@ app.whenReady().then(() => {
   ipcMain.handle("processing:probeFile", (_event, inputPath: string) => processingService.probeFile(inputPath));
   ipcMain.handle("processing:buildCommand", (_event, job: FfmpegJob) => buildFfmpegCommand(job));
   ipcMain.handle("processing:startJob", (_event, request: ProcessingJobRequest) => processingService.startJob(request));
-  ipcMain.handle("processing:startFile", async (_event, inputPath: string, presetId = "instagram-reel", outputDir?: string, transforms?: TransformSettings) => {
+  ipcMain.handle("processing:startFile", async (_event, inputPath: string, presetId = "instagram-reel", outputDir?: string, transforms?: TransformSettings, outputNaming?: OutputNamingOptions) => {
     const preset = platformPresets.find((item) => item.id === presetId) ?? platformPresets.find((item) => item.id === "instagram-reel");
     if (!preset) throw new Error("Default processing preset is missing.");
     let outputPath: string;
     try {
-      outputPath = getDefaultOutputPath(inputPath, preset.id, outputDir);
+      outputPath = getDefaultOutputPath(inputPath, preset.id, outputDir, outputNaming);
     } catch (error) {
       const failure = outputFolderFailure(`Could not create output folder: ${error instanceof Error ? error.message : String(error)}`);
       return { ok: false, message: failure.message, failure };

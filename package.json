@@ -11,7 +11,11 @@
     "dev": "concurrently -n backend,admin,desktop -c blue,green,magenta \"npm run dev -w backend\" \"npm run dev -w admin-dashboard\" \"npm run dev -w desktop-app\"",
     "app:browser": "npm run browser -w desktop-app",
     "build": "npm run build -w backend && npm run build -w admin-dashboard && npm run build -w desktop-app",
-    "test": "npm run test -w backend && npm run test -w desktop-app",
+    "test": "npm run test -w backend && npm run test -w desktop-app && npm run test -w admin-dashboard",
+    "lint": "powershell -ExecutionPolicy Bypass -File .claude/hooks/pre-commit-guard.ps1 -Mode Lint",
+    "typecheck": "npm run typecheck -w backend && npm run typecheck -w desktop-app && npm run typecheck -w admin-dashboard",
+    "ship": "powershell -ExecutionPolicy Bypass -File .claude/hooks/pre-commit-guard.ps1 -Mode Ship",
+    "prepare": "husky",
     "verify:windows-release": "powershell -ExecutionPolicy Bypass -File scripts/verify-windows-release.ps1",
     "db:generate": "npm run db:generate -w backend",
     "db:migrate": "npm run db:migrate -w backend",
@@ -19,6 +23,11 @@
     "db:seed": "npm run db:seed -w backend"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^10.0.3",
+    "husky": "^9.1.7"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1",
+    "form-data": "^4.0.6"
   }
 }

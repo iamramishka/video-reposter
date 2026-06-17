@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DeviceInfo } from "../shared/license.js";
-import type { FfmpegJob, ImportedVideoFile, PlatformPreset, TransformSettings } from "../shared/processing.js";
+import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, PlatformPreset, TransformSettings } from "../shared/processing.js";
 import type { ProbeResult, ProcessingJobRequest, ProcessingUpdate } from "../main/processingService.js";
 import type { ProcessingAvailability, ProcessingFailureResult } from "../shared/processingFailure.js";
 
@@ -19,8 +19,8 @@ contextBridge.exposeInMainWorld("videoReposter", {
   probeVideoFile: (path: string) => ipcRenderer.invoke("processing:probeFile", path) as Promise<ProbeResult>,
   buildProcessingCommand: (job: FfmpegJob) => ipcRenderer.invoke("processing:buildCommand", job) as Promise<string>,
   startProcessingJob: (job: ProcessingJobRequest) => ipcRenderer.invoke("processing:startJob", job) as Promise<{ id: string; args: string[] }>,
-  startProcessingFile: (path: string, presetId: string, outputDir?: string, transforms?: TransformSettings) =>
-    ipcRenderer.invoke("processing:startFile", path, presetId, outputDir, transforms) as Promise<
+  startProcessingFile: (path: string, presetId: string, outputDir?: string, transforms?: TransformSettings, outputNaming?: OutputNamingOptions) =>
+    ipcRenderer.invoke("processing:startFile", path, presetId, outputDir, transforms, outputNaming) as Promise<
       { ok: true; id: string; args: string[]; outputPath: string; probe: ProbeResult; preset: PlatformPreset } | ProcessingFailureResult
     >,
   stopProcessingJob: (id: string) => ipcRenderer.invoke("processing:stopJob", id) as Promise<boolean>,
