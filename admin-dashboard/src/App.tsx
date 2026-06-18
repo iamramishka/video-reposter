@@ -355,6 +355,24 @@ export default function AdminDashboard() {
     setMessage(nextMessage);
   }
 
+  async function exportAnalyticsPdf() {
+    try {
+      const res = await fetch(`${apiUrl}/api/analytics/export/pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `analytics-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setMessage("PDF export failed. Try again.");
+    }
+  }
+
   useEffect(() => {
     const saved = window.localStorage.getItem(tokenStorageKey);
     if (saved) {
@@ -557,7 +575,7 @@ export default function AdminDashboard() {
         {activeTab === "analytics" && (
           <>
             <Stats analytics={analytics} />
-            <AnalyticsPage analytics={analytics} />
+            <AnalyticsPage analytics={analytics} onExportPdf={exportAnalyticsPdf} />
           </>
         )}
 
@@ -1012,9 +1030,13 @@ function DonutChart({ plans, total }: { plans: Record<Plan, number>; total: numb
   );
 }
 
-function AnalyticsPage({ analytics }: { analytics: Analytics }) {
+function AnalyticsPage({ analytics, onExportPdf }: { analytics: Analytics; onExportPdf: () => void }) {
   return (
     <section className="analytics-panel">
+      <div className="analytics-panel-header">
+        <h2>Analytics</h2>
+        <button onClick={onExportPdf}><Download size={15} /> Export PDF</button>
+      </div>
       <div className="metric-grid">
         <Metric label="Activations" value={analytics.activations} icon={<Activity />} />
         <Metric label="Revoked" value={analytics.revoked} icon={<Ban />} />
