@@ -3,6 +3,7 @@ import { addDays, isExpired } from "../utils/dates.js";
 import { generateLicenseKey, isLicenseKey, normalizeLicenseKey } from "../utils/licenseKey.js";
 import { packageForPlan } from "../packages.js";
 import type { AuditActor, AuditRepository, LicensePlan, LicenseRecord, LicenseRepository, LicenseStatus, PackageRepository } from "../types.js";
+import type { EmailService } from "./emailService.js";
 export const devicePayloadSchema = z.object({
   key: z.string(),
   device_id: z.string().min(16),
@@ -57,7 +58,8 @@ export class LicenseService {
   constructor(
     private readonly repository: LicenseRepository,
     private readonly auditRepository?: AuditRepository,
-    private readonly packageRepository?: PackageRepository
+    private readonly packageRepository?: PackageRepository,
+    private readonly emailService?: EmailService
   ) {}
 
   async listLicenses() {
@@ -175,6 +177,7 @@ export class LicenseService {
     });
 
     await this.audit("license.created", record, { plan: record.plan, expiresAt: record.expiresAt.toISOString() }, actor);
+    this.emailService?.sendLicenseCreated(record);
     return toResponse(record, this.packageRepository);
   }
 
@@ -288,6 +291,7 @@ export class LicenseService {
 
     if (!license.deviceId) {
       await this.audit("license.activated", activated, { deviceId: payload.device_id, hostname: payload.hostname, os: payload.os });
+      this.emailService?.sendLicenseActivated(activated);
     }
     return { valid: true, ...(await toResponse(activated, this.packageRepository)) };
   }
@@ -300,6 +304,7 @@ export class LicenseService {
     const baseDate = license.expiresAt.getTime() > Date.now() ? license.expiresAt : new Date();
     const renewed = await this.repository.renew(key, addDays(baseDate, days));
     await this.audit("license.renewed", renewed, { days, expiresAt: renewed.expiresAt.toISOString() }, actor);
+    this.emailService?.sendLicenseRenewed(renewed);
     return toResponse(renewed, this.packageRepository);
   }
 
@@ -308,6 +313,7 @@ export class LicenseService {
     if (!(await this.repository.findByKey(key))) throw new LicenseError("LIC_001", 404, "License not found");
     const revoked = await this.repository.revoke(key);
     await this.audit("license.revoked", revoked, undefined, actor);
+    this.emailService?.sendLicenseRevoked(revoked);
     return toResponse(revoked, this.packageRepository);
   }
 

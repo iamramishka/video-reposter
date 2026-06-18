@@ -10,6 +10,7 @@ import { createPackageRouter } from "./routes/packages.js";
 import { createUserRouter } from "./routes/users.js";
 import { LicenseService } from "./services/licenseService.js";
 import { PackageService } from "./services/packageService.js";
+import { EmailService } from "./services/emailService.js";
 import { PrismaAuditRepository } from "./repositories/prismaAuditRepository.js";
 import { PrismaLicenseRepository } from "./repositories/prismaLicenseRepository.js";
 import { PrismaAuthRepository } from "./repositories/prismaAuthRepository.js";
@@ -36,7 +37,8 @@ export function createApp(options?: {
   const auditRepository = options?.auditRepository ?? repositories.auditRepository;
   const packageRepository = options?.packageRepository ?? repositories.packageRepository;
   const packageService = options?.packageService ?? new PackageService(packageRepository, auditRepository);
-  const licenseService = options?.licenseService ?? new LicenseService(repositories.licenseRepository, auditRepository, packageRepository);
+  const emailService = new EmailService();
+  const licenseService = options?.licenseService ?? new LicenseService(repositories.licenseRepository, auditRepository, packageRepository, emailService);
 
   app.set("trust proxy", 1);
   app.use(helmet());
