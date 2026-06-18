@@ -649,6 +649,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   function pauseBatch() {
     if (processingActions.pauseDisabled) return;
     setRunning(false);
+    setItems((current) => current.map((item) => item.status === "queued" ? { ...item, status: "paused" } : item));
     appendLog(setLogs, "Paused queue scheduling. Active FFmpeg jobs will continue.");
   }
 
@@ -902,7 +903,8 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   function renderQueuePage() {
     const finishedItemCount = getFinishedQueueItems(items).length;
     const hasFinishedItems = finishedItemCount > 0;
-    const startLabel = running ? "Running" : processingActions.activeCount > 0 ? "Resume" : "Start";
+    const hasPausedItems = items.some((item) => item.status === "paused");
+    const startLabel = running ? "Running" : (processingActions.activeCount > 0 || hasPausedItems) ? "Resume" : "Start";
     return (
       <>
         {renderStats()}

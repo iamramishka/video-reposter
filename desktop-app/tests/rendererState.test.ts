@@ -265,6 +265,14 @@ describe("renderer state persistence", () => {
       stopDisabled: true
     });
 
+    expect(getProcessingActionState([queued], true, true)).toMatchObject({
+      schedulableCount: 1,
+      startDisabled: true,
+      pauseDisabled: false,
+      stopDisabled: true,
+      startReason: "Starting queued videos."
+    });
+
     const active: QueueItem = { ...queued, status: "processing", processingJobId: "job-1" };
     expect(getProcessingActionState([active], true, true)).toMatchObject({
       activeCount: 1,

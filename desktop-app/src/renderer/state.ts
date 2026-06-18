@@ -230,7 +230,7 @@ export function getProcessingActionState(
     activeCount,
     schedulableCount,
     startDisabled: processingAvailable !== true || running || schedulableCount === 0,
-    pauseDisabled: !running || activeCount === 0,
+    pauseDisabled: !running,
     stopDisabled: activeCount === 0,
     startReason
   };
