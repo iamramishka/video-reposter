@@ -44,7 +44,7 @@ Video Reposter: Windows desktop batch video processing, online license activatio
 - [x] Add GPU auto-detection UI and CPU fallback reporting
 - [x] Complete remaining transformation controls: crop, logo/text watermark, replace audio, pitch, speed, fade in/out, custom rotation
 - [x] Add output naming templates and optional output formats
-- [ ] Add pause/resume safe checkpoints
+- [x] Add pause/resume safe checkpoints
 
 ## Phase 3: Admin Dashboard And Analytics
 
