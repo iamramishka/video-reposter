@@ -124,15 +124,31 @@ export class LicenseService {
       plans: { starter: 0, pro: 0, enterprise: 0 } as Record<LicensePlan, number>
     };
 
-    return licenses.reduce((summary, license) => {
+    const summary = licenses.reduce((s, license) => {
       const status = responseStatus(license);
-      summary[status] += 1;
-      if (license.activatedAt) summary.activations += 1;
+      s[status] += 1;
+      if (license.activatedAt) s.activations += 1;
       const daysUntilExpiry = (license.expiresAt.getTime() - Date.now()) / 86_400_000;
-      if (status !== "revoked" && daysUntilExpiry >= 0 && daysUntilExpiry <= 30) summary.expiring_soon += 1;
-      summary.plans[license.plan] += 1;
-      return summary;
+      if (status !== "revoked" && daysUntilExpiry >= 0 && daysUntilExpiry <= 30) s.expiring_soon += 1;
+      s.plans[license.plan] += 1;
+      return s;
     }, initial);
+
+    const dailyMap = new Map<string, number>();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      dailyMap.set(d.toISOString().slice(0, 10), 0);
+    }
+    for (const license of licenses) {
+      if (license.activatedAt) {
+        const key = license.activatedAt.toISOString().slice(0, 10);
+        if (dailyMap.has(key)) dailyMap.set(key, (dailyMap.get(key) ?? 0) + 1);
+      }
+    }
+    const daily_activations = Array.from(dailyMap.entries()).map(([date, count]) => ({ date, count }));
+
+    return { ...summary, daily_activations };
   }
 
   async createLicense(input: {

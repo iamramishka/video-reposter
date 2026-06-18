@@ -96,6 +96,7 @@ interface Analytics {
   activations: number;
   expiring_soon: number;
   plans: Record<Plan, number>;
+  daily_activations: { date: string; count: number }[];
 }
 
 const planLabels: Record<Plan, string> = {
@@ -112,7 +113,8 @@ const emptyAnalytics: Analytics = {
   revoked: 0,
   activations: 0,
   expiring_soon: 0,
-  plans: { starter: 0, pro: 0, enterprise: 0 }
+  plans: { starter: 0, pro: 0, enterprise: 0 },
+  daily_activations: []
 };
 
 export default function AdminDashboard() {
@@ -924,8 +926,93 @@ function CustomerRow({ user }: { user: Customer }) {
   );
 }
 
+const PLAN_COLORS: Record<Plan, string> = {
+  starter: "#2563eb",
+  pro: "#7c3aed",
+  enterprise: "#0891b2"
+};
+const PLAN_LIST: Plan[] = ["starter", "pro", "enterprise"];
+
+function LineChart({ data }: { data: Analytics["daily_activations"] }) {
+  if (!data.length) return <p className="chart-empty">No activation data yet.</p>;
+  const W = 440, H = 140, pL = 28, pR = 8, pT = 10, pB = 26;
+  const plotW = W - pL - pR, plotH = H - pT - pB;
+  const n = data.length;
+  const maxVal = Math.max(...data.map(d => d.count), 1);
+  const x = (i: number) => pL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const y = (v: number) => pT + plotH - (v / maxVal) * plotH;
+  const pts = data.map((d, i) => [x(i), y(d.count)] as [number, number]);
+  const line = pts.map(([px, py], i) => `${i === 0 ? "M" : "L"}${px.toFixed(1)},${py.toFixed(1)}`).join(" ");
+  const firstX = pts[0]?.[0] ?? pL;
+  const lastX = pts[pts.length - 1]?.[0] ?? pL;
+  const area = `${line} L${lastX.toFixed(1)},${(pT + plotH).toFixed(1)} L${firstX.toFixed(1)},${(pT + plotH).toFixed(1)} Z`;
+  const labelIdxs = data.reduce<number[]>((acc, _, i) => (i % 7 === 0 || i === n - 1 ? [...acc, i] : acc), []);
+  const yTicks = [0, Math.round(maxVal / 2), maxVal].filter((v, i, arr) => arr.indexOf(v) === i && v >= 0);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="line-chart" aria-label="Daily activations over the last 30 days">
+      <defs>
+        <linearGradient id="act-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#2563eb" stopOpacity="0.15" />
+          <stop offset="100%" stopColor="#2563eb" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {yTicks.map(v => (
+        <g key={v}>
+          <line x1={pL} y1={y(v)} x2={W - pR} y2={y(v)} stroke="#e2e8f0" strokeWidth="1" />
+          <text x={pL - 4} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize="9" fill="#94a3b8">{v}</text>
+        </g>
+      ))}
+      <path d={area} fill="url(#act-fill)" />
+      <path d={line} fill="none" stroke="#2563eb" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      {labelIdxs.map(i => (
+        <text key={i} x={x(i)} y={H - 4} textAnchor="middle" fontSize="9" fill="#94a3b8">{data[i]?.date.slice(5)}</text>
+      ))}
+    </svg>
+  );
+}
+
+function DonutChart({ plans, total }: { plans: Record<Plan, number>; total: number }) {
+  const r = 58, cx = 80, cy = 80, sw = 22;
+  const circ = 2 * Math.PI * r;
+  let offset = 0;
+  const segments = PLAN_LIST.map((plan) => {
+    const len = total > 0 ? (plans[plan] / total) * circ : 0;
+    const seg = { plan, len, offset };
+    offset += len;
+    return seg;
+  });
+  return (
+    <div className="donut-wrap">
+      <svg viewBox="0 0 160 160" className="donut-chart" aria-label="License distribution by plan">
+        <g transform="rotate(-90 80 80)">
+          {total === 0
+            ? <circle cx={cx} cy={cy} r={r} fill="none" stroke="#e2e8f0" strokeWidth={sw} />
+            : segments.map(({ plan, len, offset: off }) => len > 0 && (
+              <circle key={plan} cx={cx} cy={cy} r={r} fill="none"
+                stroke={PLAN_COLORS[plan]} strokeWidth={sw}
+                strokeDasharray={`${len.toFixed(2)} ${(circ - len).toFixed(2)}`}
+                strokeDashoffset={(circ - off).toFixed(2)}
+              />
+            ))
+          }
+        </g>
+        <text x={cx} y={cy - 7} textAnchor="middle" fontSize="20" fontWeight="700" fill="#0f172a">{total}</text>
+        <text x={cx} y={cy + 11} textAnchor="middle" fontSize="10" fill="#64748b">Total</text>
+      </svg>
+      <div className="donut-legend">
+        {PLAN_LIST.map((plan) => (
+          <div key={plan} className="legend-row">
+            <i style={{ background: PLAN_COLORS[plan] }} />
+            <span>{planLabels[plan]}</span>
+            <strong>{total > 0 ? `${Math.round((plans[plan] / total) * 100)}%` : "—"}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AnalyticsPage({ analytics }: { analytics: Analytics }) {
-  const maxPlan = Math.max(...Object.values(analytics.plans), 1);
   return (
     <section className="analytics-panel">
       <div className="metric-grid">
@@ -933,15 +1020,15 @@ function AnalyticsPage({ analytics }: { analytics: Analytics }) {
         <Metric label="Revoked" value={analytics.revoked} icon={<Ban />} />
         <Metric label="Expired" value={analytics.expired} icon={<RefreshCcw />} />
       </div>
-      <div className="plan-bars">
-        <h2>Plan Split</h2>
-        {(Object.keys(planLabels) as Plan[]).map((plan) => (
-          <div className="plan-row" key={plan}>
-            <span>{planLabels[plan]}</span>
-            <div><i style={{ width: `${(analytics.plans[plan] / maxPlan) * 100}%` }} /></div>
-            <strong>{analytics.plans[plan]}</strong>
-          </div>
-        ))}
+      <div className="analytics-charts">
+        <div className="chart-section">
+          <h2>Activations Over Time</h2>
+          <LineChart data={analytics.daily_activations} />
+        </div>
+        <div className="chart-section">
+          <h2>License Distribution</h2>
+          <DonutChart plans={analytics.plans} total={analytics.total} />
+        </div>
       </div>
     </section>
   );
