@@ -4,8 +4,10 @@
 
 Video Reposter: Windows desktop batch video processing, online license activation, backend API, and admin dashboard.
 
-**Last Updated:** 2026-06-17
-**Status:** MVP scaffold implemented; documentation reconciled with current code.
+**Last Updated:** 2026-06-19
+**Status:** Phases 1–5 complete. Phase 6 splits the remaining requirements backlog across two
+parallel agents (Claude + Codex) in isolated worktrees — see
+[docs/parallel-execution-plan.md](parallel-execution-plan.md).
 
 ## Current Implementation Snapshot
 
@@ -53,31 +55,57 @@ Video Reposter: Windows desktop batch video processing, online license activatio
 - [x] Build license filters, detail view, extend/revoke/reset-device actions, and CSV exports
 - [x] Display audit activity in the admin UI
 - [x] Add admin dashboard smoke test
-- [ ] Add richer chart visualizations for license distribution and daily activations
-- [ ] Add PDF export endpoint and UI
-- [ ] Add email notification workflows
-- [ ] Add integration tests for every admin API endpoint
+- [x] Add richer chart visualizations for license distribution and daily activations
+- [x] Add PDF export endpoint and UI
+- [x] Add email notification workflows
+- [x] Add integration tests for every admin API endpoint
 
 ## Phase 4: Polish, Security, Release
 
 - [x] Add Windows release verification workflow
 - [x] Add Claude Code quality gates, secret scan, and local pre-commit guard
 - [x] Resolve high/critical npm audit findings in the current workspace dependency tree
-- [ ] Implement auto-update detection and silent install
-- [ ] Add performance profiling targets and reports
-- [ ] Add disk usage monitor and log retention cleanup
-- [ ] Deploy backend and admin dashboard to production
-- [ ] Add production monitoring and error tracking
-- [ ] Write deployment runbook
+- [x] Implement auto-update detection and silent install
+- [x] Add performance profiling targets and reports
+- [x] Add disk usage monitor and log retention cleanup
+- [x] Deploy backend and admin dashboard to production
+- [x] Add production monitoring and error tracking
+- [x] Write deployment runbook
 
 ## Phase 5: Optional Payment Integration
 
-- [ ] Select Stripe or Paddle
-- [ ] Build payment plan pages
-- [ ] Build invoice history and downloads
-- [ ] Build payment summary dashboard
-- [ ] Add webhook handling for payment lifecycle events
-- [ ] Renew licenses automatically on payment success
+- [x] Select Stripe or Paddle
+- [x] Build payment plan pages
+- [x] Build invoice history and downloads
+- [x] Build payment summary dashboard
+- [x] Add webhook handling for payment lifecycle events
+- [x] Renew licenses automatically on payment success
+
+## Phase 6: Parallel Agent Execution (Claude + Codex)
+
+Remaining `docs/requirements.md` backlog is split across two AI agents working in **isolated git
+worktrees** so they never edit the same files. Full task allocation, worktree setup, the
+desktop↔backend telemetry interface contract, the GitHub review/merge workflow, and the live
+self-marking checkboxes live in **[docs/parallel-execution-plan.md](parallel-execution-plan.md)**.
+
+**Lane A — Claude** · `desktop-app/**` · branch `feat/desktop-enhancements`
+
+- [ ] A1–A9 desktop UX/processing: drag-drop polish, import summary, output picker, quality presets, custom resolution, overall ETA, auto-open output, custom preset editor, device-conflict recovery
+- [ ] A10 telemetry (desktop half): post finished-job stats to backend per interface contract
+
+**Lane B — Codex** · `backend/**` + `admin-dashboard/**` · branch `feat/backend-admin-enhancements`
+
+- [ ] B1 scheduled expiry-reminder emails (30/14/7/1 days)
+- [ ] B2 configurable session-timeout UX
+- [ ] B3 dedicated login audit view
+- [ ] B4 full user CRUD; B5 soft-delete + retention policy
+- [ ] B6 telemetry ingest + admin processing-statistics view; B7 top error codes
+- [ ] B8 churn metric; B9 server-side CSV report endpoint
+- [ ] B10 HTTPS enforcement at edge; B11 timing-safe license-key comparison
+
+**Integration**
+
+- [ ] Both lanes pass `npm run ship`, reviewed (security review on B1–B5/B10/B11), merged to `integrate/parallel-features`, then to `main`
 
 ## Key Decisions
 

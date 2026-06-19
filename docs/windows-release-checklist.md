@@ -14,6 +14,8 @@ npm run dist -w desktop-app
 
 The release artifacts are created in `desktop-app/release/`.
 
+Packaged builds check `VIDEO_REPOSTER_UPDATE_URL` for update manifests, falling back to `https://updates.videoreposter.com/api/updates/latest`. Before enabling customer auto-updates, publish a manifest with the latest installer URL and SHA-256 checksum.
+
 ## Automated Verification
 
 Run:

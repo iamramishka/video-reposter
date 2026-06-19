@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Check,
   Copy,
+  CreditCard,
   Download,
   Eye,
   KeyRound,
@@ -34,7 +35,7 @@ const activityPageSize = 6;
 
 type Plan = "starter" | "pro" | "enterprise";
 type Status = "pending" | "active" | "expired" | "revoked";
-type Tab = "dashboard" | "licenses" | "users" | "analytics" | "packages" | "account";
+type Tab = "dashboard" | "licenses" | "users" | "analytics" | "packages" | "payments" | "account";
 type AdminRole = "super_admin" | "admin" | "read_only";
 type ExpiryFilter = "all" | "1" | "7" | "14" | "30" | "expired";
 type DeviceFilter = "all" | "bound" | "unbound";
@@ -99,6 +100,27 @@ interface Analytics {
   daily_activations: { date: string; count: number }[];
 }
 
+interface StripeInvoice {
+  id: string;
+  customer_email: string | null;
+  amount_paid: number;
+  currency: string;
+  status: string;
+  created: number;
+  hosted_invoice_url: string | null;
+  invoice_pdf: string | null;
+  period_start: number;
+  period_end: number;
+}
+
+interface PaymentSummary {
+  configured: boolean;
+  mrr?: number;
+  arr?: number;
+  activeSubscriptions?: number;
+  currency?: string;
+}
+
 const planLabels: Record<Plan, string> = {
   starter: "Starter",
   pro: "Pro",
@@ -157,6 +179,12 @@ export default function AdminDashboard() {
     newPassword: "",
     confirmPassword: ""
   });
+  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
+  const [invoices, setInvoices] = useState<StripeInvoice[]>([]);
+  const [checkoutEmail, setCheckoutEmail] = useState("");
+  const [checkoutPlan, setCheckoutPlan] = useState<Plan>("pro");
+  const [checkoutUrl, setCheckoutUrl] = useState("");
+  const [invoiceEmail, setInvoiceEmail] = useState("");
 
   async function api<T>(path: string, options: RequestInit = {}) {
     const response = await fetch(`${apiUrl}${path}`, {
@@ -355,6 +383,47 @@ export default function AdminDashboard() {
     setMessage(nextMessage);
   }
 
+  async function loadPayments() {
+    try {
+      const summary = await api<PaymentSummary>("/api/payments/summary");
+      setPaymentSummary(summary);
+    } catch {
+      setPaymentSummary({ configured: false });
+    }
+  }
+
+  async function createCheckoutLink() {
+    setBusy(true);
+    setCheckoutUrl("");
+    setMessage("");
+    try {
+      const origin = window.location.origin;
+      const result = await api<{ url: string }>("/api/payments/checkout", {
+        method: "POST",
+        body: JSON.stringify({ plan: checkoutPlan, email: checkoutEmail, successUrl: `${origin}/`, cancelUrl: `${origin}/` })
+      });
+      setCheckoutUrl(result.url);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create checkout link");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadInvoices() {
+    if (!invoiceEmail.trim()) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api<{ invoices: StripeInvoice[] }>(`/api/payments/invoices?email=${encodeURIComponent(invoiceEmail)}`);
+      setInvoices(result.invoices ?? []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not load invoices");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function exportAnalyticsPdf() {
     try {
       const res = await fetch(`${apiUrl}/api/analytics/export/pdf`, {
@@ -384,6 +453,10 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (token) void loadDashboard();
   }, [token]);
+
+  useEffect(() => {
+    if (activeTab === "payments" && token && !paymentSummary) void loadPayments();
+  }, [activeTab, token]);
 
   const filteredLicenses = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -466,6 +539,7 @@ export default function AdminDashboard() {
         <NavButton tab="users" activeTab={activeTab} onClick={setActiveTab} icon={<UsersRound />} label="Users" />
         <NavButton tab="packages" activeTab={activeTab} onClick={setActiveTab} icon={<PackageCheck />} label="Packages" />
         <NavButton tab="analytics" activeTab={activeTab} onClick={setActiveTab} icon={<BarChart3 />} label="Analytics" />
+        <NavButton tab="payments" activeTab={activeTab} onClick={setActiveTab} icon={<CreditCard />} label="Payments" />
         <NavButton tab="account" activeTab={activeTab} onClick={setActiveTab} icon={<LockKeyhole />} label="Account" />
       </aside>
       <section className="workspace">
@@ -577,6 +651,24 @@ export default function AdminDashboard() {
             <Stats analytics={analytics} />
             <AnalyticsPage analytics={analytics} onExportPdf={exportAnalyticsPdf} />
           </>
+        )}
+
+        {activeTab === "payments" && (
+          <PaymentsPage
+            summary={paymentSummary}
+            invoices={invoices}
+            checkoutEmail={checkoutEmail}
+            checkoutPlan={checkoutPlan}
+            checkoutUrl={checkoutUrl}
+            invoiceEmail={invoiceEmail}
+            busy={busy}
+            canWrite={canWrite}
+            setCheckoutEmail={setCheckoutEmail}
+            setCheckoutPlan={setCheckoutPlan}
+            setInvoiceEmail={setInvoiceEmail}
+            onCreateCheckout={createCheckoutLink}
+            onLoadInvoices={loadInvoices}
+          />
         )}
 
         {activeTab === "account" && (
@@ -1346,8 +1438,128 @@ function getPackageSummaries(licenses: License[]) {
   return summaries;
 }
 
+function PaymentsPage({ summary, invoices, checkoutEmail, checkoutPlan, checkoutUrl, invoiceEmail, busy, canWrite, setCheckoutEmail, setCheckoutPlan, setInvoiceEmail, onCreateCheckout, onLoadInvoices }: {
+  summary: PaymentSummary | null;
+  invoices: StripeInvoice[];
+  checkoutEmail: string;
+  checkoutPlan: Plan;
+  checkoutUrl: string;
+  invoiceEmail: string;
+  busy: boolean;
+  canWrite: boolean;
+  setCheckoutEmail: (v: string) => void;
+  setCheckoutPlan: (v: Plan) => void;
+  setInvoiceEmail: (v: string) => void;
+  onCreateCheckout: () => void;
+  onLoadInvoices: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  function copyUrl() {
+    void navigator.clipboard.writeText(checkoutUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  if (summary && !summary.configured) {
+    return (
+      <section className="table-panel">
+        <div className="payments-unconfigured">
+          <CreditCard size={40} />
+          <h2>Stripe Not Configured</h2>
+          <p>Set <code>STRIPE_SECRET_KEY</code> and price IDs in your backend environment to enable payments.</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <>
+      <div className="stats">
+        <div className="stat"><span className="stat-value">{summary?.activeSubscriptions ?? "—"}</span><span className="stat-label">Active Subscribers</span></div>
+        <div className="stat"><span className="stat-value">{summary?.mrr !== undefined ? `$${summary.mrr.toFixed(2)}` : "—"}</span><span className="stat-label">MRR</span></div>
+        <div className="stat"><span className="stat-value">{summary?.arr !== undefined ? `$${summary.arr.toFixed(2)}` : "—"}</span><span className="stat-label">ARR</span></div>
+      </div>
+
+      <section className="create-panel">
+        <h2>Create Checkout Link</h2>
+        <p className="panel-hint">Generate a Stripe Checkout URL to send to a customer for a specific plan.</p>
+        <div className="checkout-form">
+          <input
+            placeholder="Customer email"
+            type="email"
+            value={checkoutEmail}
+            onChange={(e) => setCheckoutEmail(e.target.value)}
+          />
+          <select value={checkoutPlan} onChange={(e) => setCheckoutPlan(e.target.value as Plan)}>
+            {(["starter", "pro", "enterprise"] as Plan[]).map((plan) => (
+              <option key={plan} value={plan}>{planLabels[plan]}</option>
+            ))}
+          </select>
+          <button className="primary" onClick={onCreateCheckout} disabled={busy || !canWrite || !checkoutEmail.trim()}>
+            <CreditCard /> Generate Link
+          </button>
+        </div>
+        {checkoutUrl && (
+          <div className="checkout-url-row">
+            <input readOnly value={checkoutUrl} className="checkout-url-input" />
+            <button onClick={copyUrl}>{copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy"}</button>
+          </div>
+        )}
+      </section>
+
+      <section className="table-panel">
+        <div className="table-title">
+          <h2>Invoice History</h2>
+          <div className="invoice-search">
+            <input
+              placeholder="Customer email"
+              type="email"
+              value={invoiceEmail}
+              onChange={(e) => setInvoiceEmail(e.target.value)}
+            />
+            <button onClick={onLoadInvoices} disabled={busy || !invoiceEmail.trim()}><Search /> Look Up</button>
+          </div>
+        </div>
+        {invoices.length > 0 ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Invoice</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv) => (
+                <tr key={inv.id}>
+                  <td>{new Date(inv.created * 1000).toLocaleDateString()}</td>
+                  <td>{inv.customer_email ?? "—"}</td>
+                  <td>{(inv.amount_paid / 100).toFixed(2)} {inv.currency.toUpperCase()}</td>
+                  <td><span className={`status-pill ${inv.status === "paid" ? "active" : "pending"}`}>{inv.status}</span></td>
+                  <td className="invoice-links">
+                    {inv.hosted_invoice_url && <a href={inv.hosted_invoice_url} target="_blank" rel="noopener noreferrer"><Eye size={14} /> View</a>}
+                    {inv.invoice_pdf && <a href={inv.invoice_pdf} target="_blank" rel="noopener noreferrer"><Download size={14} /> PDF</a>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : invoiceEmail ? (
+          <p className="empty-state">No invoices found for {invoiceEmail}.</p>
+        ) : (
+          <p className="empty-state">Enter a customer email above to load their invoice history.</p>
+        )}
+      </section>
+    </>
+  );
+}
+
 function pageTitle(tab: Tab) {
-  return ({ dashboard: "Admin Dashboard", licenses: "Licenses", users: "Users", analytics: "Analytics", packages: "Packages", account: "Account" } satisfies Record<Tab, string>)[tab];
+  return ({ dashboard: "Admin Dashboard", licenses: "Licenses", users: "Users", analytics: "Analytics", packages: "Packages", payments: "Payments", account: "Account" } satisfies Record<Tab, string>)[tab];
 }
 
 function pageSubtitle(tab: Tab) {
@@ -1357,6 +1569,7 @@ function pageSubtitle(tab: Tab) {
     users: "Customer accounts grouped from license records.",
     packages: "Manually allocate Starter, Pro, or Enterprise to licenses.",
     analytics: "License, activation, and plan performance.",
+    payments: "Stripe revenue summary, checkout links, and invoice history.",
     account: "Update admin sign-in security."
   } satisfies Record<Tab, string>)[tab];
 }

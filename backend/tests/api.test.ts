@@ -268,6 +268,48 @@ describe("license API", () => {
       expiring_soon: 1,
       plans: expect.objectContaining({ starter: 1, pro: 1 })
     }));
+    expect(analytics.body.analytics.daily_activations).toHaveLength(30);
+    expect(analytics.body.analytics.daily_activations[0]).toEqual(
+      expect.objectContaining({ date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), count: expect.any(Number) })
+    );
+  });
+
+  it("revokes a license through the admin HTTP route", async () => {
+    const service = new LicenseService(new MemoryLicenseRepository());
+    const app = createApp({ licenseService: service });
+    const token = jwt.sign({ sub: "admin-1", email: "admin@videoreposter.local", role: "admin" }, config.jwtSecret);
+
+    await service.createLicense({ key: "VDRP-REVO-HTTP-TEST-0001", expiresAt: addDays(new Date(), 30).toISOString() });
+    await service.activate({ key: "VDRP-REVO-HTTP-TEST-0001", device_id: "device-revoke-0001" });
+
+    const revoked = await request(app)
+      .post("/api/license/revoke")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ key: "VDRP-REVO-HTTP-TEST-0001" })
+      .expect(200);
+
+    expect(revoked.body.license).toEqual(expect.objectContaining({ status: "revoked" }));
+
+    await request(app)
+      .post("/api/license/activate")
+      .send({ key: "VDRP-REVO-HTTP-TEST-0001", device_id: "device-revoke-0002" })
+      .expect(403)
+      .expect(({ body }) => { expect(body.code).toBe("LIC_004"); });
+  });
+
+  it("returns a PDF from the analytics export endpoint", async () => {
+    const service = new LicenseService(new MemoryLicenseRepository());
+    const app = createApp({ licenseService: service });
+    const token = jwt.sign({ sub: "admin-1", email: "admin@videoreposter.local", role: "admin" }, config.jwtSecret);
+
+    const response = await request(app)
+      .get("/api/analytics/export/pdf")
+      .set("Authorization", `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.headers["content-type"]).toMatch(/application\/pdf/);
+    expect(response.headers["content-disposition"]).toMatch(/attachment.*\.pdf/);
+    expect(response.body).toBeDefined();
   });
 
   it("returns and updates package limits with audit logs", async () => {

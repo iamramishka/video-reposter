@@ -22,10 +22,13 @@ export type ProcessingUpdate = {
   currentSeconds?: number;
   message?: string;
   failure?: ProcessingFailure;
+  elapsedMs?: number;
+  throughputMbPerMin?: number;
 };
 
 export type ProcessingJobRequest = FfmpegJob & {
   durationSeconds?: number;
+  inputSizeBytes?: number;
 };
 
 export type ProbeResult = {
@@ -61,6 +64,8 @@ export class ProcessingService {
     const args = buildFfmpegArgs(request);
     const child = this.processFactory(this.tools.ffmpeg, args);
     this.processes.set(id, child);
+    const startedAt = Date.now();
+    const { inputSizeBytes } = request;
 
     // Keep a rolling buffer of the most recent stderr lines so a failed job can
     // report *why* FFmpeg failed instead of just an exit code.
@@ -96,21 +101,25 @@ export class ProcessingService {
 
     child.on("error", (error) => {
       const failure = classifyProcessingFailure(error.message);
-      settle({ id, status: "failed", progress: 0, message: failure.message, failure });
+      settle({ id, status: "failed", progress: 0, message: failure.message, failure, elapsedMs: Date.now() - startedAt });
     });
 
     child.on("close", (code, signal) => {
+      const elapsedMs = Date.now() - startedAt;
       if (signal === "SIGTERM" || signal === "SIGKILL") {
-        settle({ id, status: "stopped", progress: 0, message: "Processing stopped." });
+        settle({ id, status: "stopped", progress: 0, message: "Processing stopped.", elapsedMs });
         return;
       }
       if (code === 0) {
-        settle({ id, status: "complete", progress: 100, message: "Processing complete." });
+        const throughputMbPerMin = inputSizeBytes && elapsedMs > 0
+          ? Math.round((inputSizeBytes / 1e6) / (elapsedMs / 60_000) * 10) / 10
+          : undefined;
+        settle({ id, status: "complete", progress: 100, message: "Processing complete.", elapsedMs, throughputMbPerMin });
         return;
       }
       const reason = stderrTail.length ? ` ${stderrTail.slice(-3).join(" ")}` : "";
       const failure = processingFailedFailure(`FFmpeg exited with code ${code ?? "unknown"}.${reason}`.trim());
-      settle({ id, status: "failed", progress: 0, message: failure.message, failure });
+      settle({ id, status: "failed", progress: 0, message: failure.message, failure, elapsedMs });
     });
 
     return { id, args };

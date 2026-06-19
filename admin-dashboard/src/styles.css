@@ -1081,3 +1081,110 @@ small {
     grid-template-columns: 90px 1fr 40px;
   }
 }
+
+/* ── Payments page ── */
+
+.payments-unconfigured {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 24px;
+  color: #64748b;
+  text-align: center;
+}
+
+.payments-unconfigured h2 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.payments-unconfigured p {
+  margin: 0;
+  max-width: 480px;
+}
+
+.payments-unconfigured code {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.875rem;
+}
+
+.panel-hint {
+  color: #64748b;
+  font-size: 0.875rem;
+  margin: 0 0 12px;
+}
+
+.checkout-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.checkout-form input {
+  flex: 1 1 200px;
+}
+
+.checkout-form select {
+  flex: 0 0 130px;
+}
+
+.checkout-url-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.checkout-url-input {
+  flex: 1;
+  background: #f8fafc;
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.invoice-search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.invoice-search input {
+  width: 220px;
+}
+
+.invoice-links {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.invoice-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #3b82f6;
+  text-decoration: none;
+  font-size: 0.82rem;
+}
+
+.invoice-links a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 700px) {
+  .checkout-form {
+    flex-direction: column;
+  }
+
+  .invoice-search {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .invoice-search input {
+    width: 100%;
+  }
+}

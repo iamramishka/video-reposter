@@ -64,7 +64,7 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Structured customer-safe failure messages
 - [x] Timestamped processing logs
 - [x] Queue/history state helpers
-- [ ] Pause/resume safe checkpoints
+- [x] Pause/resume safe checkpoints
 - [ ] Overall ETA
 - [ ] Auto-open output folder option
 
@@ -103,24 +103,24 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Reset device activation
 - [x] Filter by plan, status, device, expiry, company, and search text
 - [x] License detail view and activity timeline
-- [ ] License distribution chart
+- [x] License distribution chart
 
 ### 2.4 Analytics
 
 - [x] Total, active, pending, expired, revoked, activations, expiring soon, and plan split
 - [x] CSV exports for licenses and users
-- [ ] Daily activation chart
+- [x] Daily activation chart
 - [ ] Processing statistics from desktop history
 - [ ] Top error codes
-- [ ] PDF export
+- [x] PDF export
 
 ### 2.5 Optional Payments
 
-- [ ] Select Stripe or Paddle
-- [ ] Payment history
-- [ ] Invoice downloads
-- [ ] MRR/ARR/churn dashboard
-- [ ] Webhook-driven license renewal
+- [x] Select Stripe or Paddle
+- [x] Payment history
+- [x] Invoice downloads
+- [ ] MRR/ARR/churn dashboard (MRR/ARR/subscribers shipped; churn metric pending)
+- [x] Webhook-driven license renewal
 
 ## 3. Backend API
 
@@ -140,7 +140,7 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Package limit management
 - [x] Analytics summary
 - [x] Audit logs
-- [ ] PDF report endpoint
+- [x] PDF report endpoint
 - [ ] CSV report endpoint separate from admin client-side export
 
 ### 3.3 Security

@@ -5,8 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { LicenseClient } from "./licenseClient.js";
-import { appendProcessingLog, getProcessingLogPath } from "./processingLog.js";
+import { appendProcessingLog, getProcessingLogPath, trimProcessingLogs } from "./processingLog.js";
 import { ProcessingService } from "./processingService.js";
+import { AutoUpdateService } from "./autoUpdateService.js";
+import { checkDiskSpace } from "./diskMonitor.js";
 import { getStableDeviceId, readLicenseCache, writeLicenseCache } from "./licenseCache.js";
 import { isLicenseKey, normalizeLicenseKey, stateFromCache } from "../shared/license.js";
 import { productName } from "../shared/branding.js";
@@ -135,8 +137,15 @@ function showOpenDialogWithParent(event: IpcMainInvokeEvent, options: OpenDialog
 }
 
 app.whenReady().then(() => {
+  trimProcessingLogs(app.getPath("userData"), 30);
+
   const processingService = new ProcessingService((update) => {
-    appendProcessingLog(app.getPath("userData"), `[${update.status}] ${update.id} ${update.progress}% ${update.failure?.technicalMessage ?? update.message ?? ""}`.trim());
+    let logLine = `[${update.status}] ${update.id} ${update.progress}% ${update.failure?.technicalMessage ?? update.message ?? ""}`.trim();
+    if (update.elapsedMs !== undefined) {
+      logLine += ` | ${(update.elapsedMs / 1000).toFixed(1)}s`;
+      if (update.throughputMbPerMin !== undefined) logLine += ` | ${update.throughputMbPerMin} MB/min`;
+    }
+    appendProcessingLog(app.getPath("userData"), logLine);
     BrowserWindow.getAllWindows().forEach((window) => window.webContents.send("processing:update", update));
   });
 
@@ -201,6 +210,7 @@ app.whenReady().then(() => {
       const failure = invalidVideoFailure(probe.message ?? "Video validation failed.");
       return { ok: false, message: failure.message, failure };
     }
+    const inputSizeBytes = (() => { try { return statSync(inputPath).size; } catch { return undefined; } })();
     return {
       ok: true,
       ...processingService.startJob({
@@ -208,7 +218,8 @@ app.whenReady().then(() => {
         outputPath,
         output: preset.settings,
         transforms,
-        durationSeconds: probe.durationSeconds
+        durationSeconds: probe.durationSeconds,
+        inputSizeBytes
       }),
       outputPath,
       probe,
@@ -216,6 +227,8 @@ app.whenReady().then(() => {
     };
   });
   ipcMain.handle("processing:stopJob", (_event, id: string) => processingService.stopJob(id));
+  ipcMain.handle("files:checkDiskSpace", (_event, targetPath: string) => checkDiskSpace(targetPath));
+
   ipcMain.handle("files:selectVideos", async (event) => {
     const result = await showOpenDialogWithParent(event, {
       title: "Select videos",
@@ -240,6 +253,17 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  const updateService = new AutoUpdateService({
+    app,
+    dialog,
+    getMainWindow: () => mainWindow,
+    updateUrl: process.env.VIDEO_REPOSTER_UPDATE_URL,
+    allowInDev: process.env.VIDEO_REPOSTER_UPDATES_IN_DEV === "1",
+    log: (message) => appendProcessingLog(app.getPath("userData"), message)
+  });
+  updateService.start();
+  app.on("before-quit", () => updateService.stop());
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -7,10 +7,13 @@ import { createAnalyticsRouter } from "./routes/analytics.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createLicenseRouter } from "./routes/licenses.js";
 import { createPackageRouter } from "./routes/packages.js";
+import { createPaymentRouter } from "./routes/payments.js";
 import { createUserRouter } from "./routes/users.js";
+import { createWebhookRouter } from "./routes/webhooks.js";
 import { LicenseService } from "./services/licenseService.js";
 import { PackageService } from "./services/packageService.js";
 import { EmailService } from "./services/emailService.js";
+import { StripeService } from "./services/stripeService.js";
 import { PrismaAuditRepository } from "./repositories/prismaAuditRepository.js";
 import { PrismaLicenseRepository } from "./repositories/prismaLicenseRepository.js";
 import { PrismaAuthRepository } from "./repositories/prismaAuthRepository.js";
@@ -27,6 +30,7 @@ import type { AuditRepository, AuthRepository, PackageRepository } from "./types
 export function createApp(options?: {
   licenseService?: LicenseService;
   packageService?: PackageService;
+  stripeService?: StripeService;
   auditRepository?: AuditRepository;
   authRepository?: AuthRepository;
   packageRepository?: PackageRepository;
@@ -38,11 +42,17 @@ export function createApp(options?: {
   const packageRepository = options?.packageRepository ?? repositories.packageRepository;
   const packageService = options?.packageService ?? new PackageService(packageRepository, auditRepository);
   const emailService = new EmailService();
+  const stripeService = options?.stripeService ?? new StripeService();
   const licenseService = options?.licenseService ?? new LicenseService(repositories.licenseRepository, auditRepository, packageRepository, emailService);
 
   app.set("trust proxy", 1);
   app.use(helmet());
   app.use(cors({ origin: resolveCorsOrigin(), credentials: false }));
+
+  // Stripe webhook must receive the raw body before express.json() parses it
+  app.use("/webhooks", createWebhookRouter(licenseService, stripeService));
+  app.use("/api/webhooks", createWebhookRouter(licenseService, stripeService));
+
   app.use(express.json({ limit: "1mb" }));
   app.use("/api/auth", rateLimit({ windowMs: 60_000, limit: 8, standardHeaders: true, legacyHeaders: false }));
   app.use("/api/license", rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }));
@@ -53,6 +63,29 @@ export function createApp(options?: {
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, service: "video-reposter-api" });
   });
+  app.get("/api/health/detailed", async (_req, res, next) => {
+    try {
+      let database: { status: string; latencyMs?: number } = { status: "not_checked" };
+      if (!config.supabaseUrl) {
+        const t0 = Date.now();
+        try {
+          await prisma.$queryRaw`SELECT 1`;
+          database = { status: "connected", latencyMs: Date.now() - t0 };
+        } catch {
+          database = { status: "disconnected" };
+        }
+      }
+      res.json({
+        ok: database.status !== "disconnected",
+        service: "video-reposter-api",
+        uptime: Math.round(process.uptime()),
+        database,
+        email: { configured: Boolean(process.env.SMTP_HOST) }
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.use("/api/auth", createAuthRouter(options?.authRepository ?? repositories.authRepository, auditRepository));
   app.use("/api", createLicenseRouter(licenseService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
@@ -60,6 +93,7 @@ export function createApp(options?: {
   app.use("/api", createAnalyticsRouter(licenseService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
   app.use("/api", createPackageRouter(packageService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
   app.use("/api", createAuditLogRouter(auditRepository, { requireAdminAuth: options?.requireAdminAuth ?? true }));
+  app.use("/api", createPaymentRouter(licenseService, stripeService, { requireAdminAuth: options?.requireAdminAuth ?? true }));
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error(error);

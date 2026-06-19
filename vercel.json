@@ -1,5 +1,15 @@
 {
-  "buildCommand": "npm run build -w backend && npm run build -w admin-dashboard",
+  "buildCommand": "npm run build:production",
   "outputDirectory": "admin-dashboard/dist",
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }
