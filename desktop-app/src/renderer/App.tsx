@@ -1775,6 +1775,8 @@ type PresetDraft = {
   codec: VideoCodec;
   maxDurationSeconds: string;
   normalizeAudio: boolean;
+  crf: string;
+  encoderPreset: string;
 };
 
 function PresetEditorDialog({ preset, onCancel, onSave }: { preset: PlatformPreset; onCancel: () => void; onSave: (preset: PlatformPreset) => void }) {
@@ -1841,12 +1843,31 @@ function PresetEditorDialog({ preset, onCancel, onSave }: { preset: PlatformPres
             <span>Max Seconds</span>
             <input type="number" min={1} max={14400} placeholder="Optional" value={draft.maxDurationSeconds} onChange={(event) => setValue("maxDurationSeconds", event.target.value)} />
           </label>
+          <label>
+            <span>CRF <small title="0–51; lower = better quality. Leave blank to use bitrate-only mode.">(?)</small></span>
+            <input type="number" min={0} max={51} placeholder="Optional (e.g. 23)" value={draft.crf} onChange={(event) => setValue("crf", event.target.value)} />
+          </label>
+          <label>
+            <span>Encoder Speed</span>
+            <select value={draft.encoderPreset} onChange={(event) => setValue("encoderPreset", event.target.value)}>
+              <option value="">Default</option>
+              <option value="ultrafast">Ultrafast</option>
+              <option value="superfast">Superfast</option>
+              <option value="veryfast">Very Fast</option>
+              <option value="faster">Faster</option>
+              <option value="fast">Fast</option>
+              <option value="medium">Medium</option>
+              <option value="slow">Slow</option>
+              <option value="slower">Slower</option>
+              <option value="veryslow">Very Slow</option>
+            </select>
+          </label>
           <label className="settings-toggle preset-editor-toggle">
             <input type="checkbox" checked={draft.normalizeAudio} onChange={(event) => setValue("normalizeAudio", event.target.checked)} />
             <span>Normalize audio</span>
           </label>
         </div>
-        {!settings && <p className="preset-editor-error"><AlertTriangle size={15} /> Use valid dimensions, FPS, and bitrate values like 4M or 128k.</p>}
+        {!settings && <p className="preset-editor-error"><AlertTriangle size={15} /> Use valid dimensions, FPS, bitrate values like 4M or 128k, and CRF 0–51.</p>}
         <div className="confirmation-actions">
           <button onClick={onCancel}>Cancel</button>
           <button
@@ -1894,7 +1915,9 @@ function presetToDraft(preset: PlatformPreset): PresetDraft {
     audioBitrate: preset.settings.audioBitrate,
     codec: preset.settings.codec,
     maxDurationSeconds: preset.settings.maxDurationSeconds ? String(preset.settings.maxDurationSeconds) : "",
-    normalizeAudio: Boolean(preset.settings.normalizeAudio)
+    normalizeAudio: Boolean(preset.settings.normalizeAudio),
+    crf: preset.settings.crf !== undefined ? String(preset.settings.crf) : "",
+    encoderPreset: preset.settings.preset ?? ""
   };
 }
 
@@ -1905,6 +1928,9 @@ function draftToPresetSettings(draft: PresetDraft): OutputSettings | null {
   const maxDurationSeconds = draft.maxDurationSeconds.trim() ? parsePresetInteger(draft.maxDurationSeconds, 1, 14400) : undefined;
   if (!width || !height || !fps || maxDurationSeconds === null) return null;
   if (!isBitrateValue(draft.videoBitrate) || !isBitrateValue(draft.audioBitrate)) return null;
+  const crf = draft.crf.trim() ? parsePresetInteger(draft.crf, 0, 51) : undefined;
+  if (crf === null) return null;
+  const encoderPreset = draft.encoderPreset.trim() || undefined;
   return {
     width: width % 2 === 0 ? width : width + 1,
     height: height % 2 === 0 ? height : height + 1,
@@ -1913,7 +1939,9 @@ function draftToPresetSettings(draft: PresetDraft): OutputSettings | null {
     audioBitrate: draft.audioBitrate.trim(),
     codec: draft.codec,
     maxDurationSeconds,
-    normalizeAudio: draft.normalizeAudio || undefined
+    normalizeAudio: draft.normalizeAudio || undefined,
+    crf: crf ?? undefined,
+    preset: encoderPreset
   };
 }
 
