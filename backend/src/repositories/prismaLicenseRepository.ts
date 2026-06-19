@@ -2,7 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { LicensePlan, LicenseRecord, LicenseRepository } from "../types.js";
 
 function includeUser() {
-  return { user: { select: { name: true, email: true, company: true } } };
+  return { user: { select: { id: true, name: true, email: true, company: true, disabledAt: true, deletedAt: true } } };
 }
 
 export class PrismaLicenseRepository implements LicenseRepository {
@@ -10,14 +10,15 @@ export class PrismaLicenseRepository implements LicenseRepository {
 
   list(): Promise<LicenseRecord[]> {
     return this.prisma.license.findMany({
+      where: { deletedAt: null },
       include: includeUser(),
       orderBy: { createdAt: "desc" }
     }) as Promise<LicenseRecord[]>;
   }
 
   findByKey(key: string): Promise<LicenseRecord | null> {
-    return this.prisma.license.findUnique({
-      where: { key },
+    return this.prisma.license.findFirst({
+      where: { key, deletedAt: null },
       include: includeUser()
     }) as Promise<LicenseRecord | null>;
   }
@@ -91,6 +92,22 @@ export class PrismaLicenseRepository implements LicenseRepository {
     return this.prisma.license.update({
       where: { key },
       data: { status: "revoked" },
+      include: includeUser()
+    }) as Promise<LicenseRecord>;
+  }
+
+  softDelete(key: string, retentionUntil: Date): Promise<LicenseRecord> {
+    const now = new Date();
+    return this.prisma.license.update({
+      where: { key },
+      data: {
+        deletedAt: now,
+        retentionUntil,
+        status: "revoked",
+        deviceId: null,
+        hostname: null,
+        os: null
+      },
       include: includeUser()
     }) as Promise<LicenseRecord>;
   }

@@ -1,9 +1,25 @@
 import { z } from "zod";
 import { addDays, isExpired } from "../utils/dates.js";
-import { generateLicenseKey, isLicenseKey, normalizeLicenseKey } from "../utils/licenseKey.js";
+import { generateLicenseKey, isLicenseKey, normalizeLicenseKey, timingSafeLicenseKeyEqual } from "../utils/licenseKey.js";
 import { packageForPlan } from "../packages.js";
 import type { AuditActor, AuditRepository, LicensePlan, LicenseRecord, LicenseRepository, LicenseStatus, PackageRepository } from "../types.js";
-import type { EmailService } from "./emailService.js";
+import type { LicenseEmailService } from "./emailService.js";
+
+const EXPIRY_REMINDER_DAYS = [30, 14, 7, 1] as const;
+
+export interface ExpiryReminderRunSummary {
+  checked: number;
+  sent: number;
+  skipped: number;
+  skippedUnconfigured: number;
+  reminders: {
+    key: string;
+    email: string;
+    daysRemaining: number;
+    expiresAt: string;
+  }[];
+}
+
 export const devicePayloadSchema = z.object({
   key: z.string(),
   device_id: z.string().min(16),
@@ -59,7 +75,7 @@ export class LicenseService {
     private readonly repository: LicenseRepository,
     private readonly auditRepository?: AuditRepository,
     private readonly packageRepository?: PackageRepository,
-    private readonly emailService?: EmailService
+    private readonly emailService?: LicenseEmailService
   ) {}
 
   async listLicenses() {
@@ -153,6 +169,67 @@ export class LicenseService {
     return { ...summary, daily_activations };
   }
 
+  async sendExpiryReminders(now = new Date()): Promise<ExpiryReminderRunSummary> {
+    const licenses = await this.repository.list();
+    const sentKeys = await this.expiryReminderAuditKeys();
+    const emailConfigured = this.emailService?.isConfigured() ?? false;
+    const summary: ExpiryReminderRunSummary = {
+      checked: licenses.length,
+      sent: 0,
+      skipped: 0,
+      skippedUnconfigured: 0,
+      reminders: []
+    };
+
+    for (const license of licenses) {
+      const daysRemaining = daysUntilExpiry(license.expiresAt, now);
+      if (
+        !isReminderDay(daysRemaining) ||
+        license.status === "revoked" ||
+        isExpired(license.expiresAt, now) ||
+        !license.user?.email
+      ) {
+        summary.skipped += 1;
+        continue;
+      }
+
+      const auditKey = expiryReminderAuditKey(license.key, daysRemaining);
+      if (sentKeys.has(auditKey)) {
+        summary.skipped += 1;
+        continue;
+      }
+
+      if (!emailConfigured) {
+        summary.skippedUnconfigured += 1;
+        continue;
+      }
+
+      this.emailService?.sendLicenseExpiryReminder(license, daysRemaining);
+      await this.auditRepository?.record({
+        action: "license.expiry_reminder_sent",
+        subjectType: "license",
+        subjectId: license.key,
+        licenseId: license.id,
+        metadata: {
+          thresholdDays: daysRemaining,
+          expiresAt: license.expiresAt.toISOString(),
+          customerEmail: license.user.email
+        }
+      });
+
+      sentKeys.add(auditKey);
+      summary.sent += 1;
+      summary.reminders.push({
+        key: license.key,
+        email: license.user.email,
+        daysRemaining,
+        expiresAt: license.expiresAt.toISOString()
+      });
+    }
+
+    return summary;
+  }
+
   async createLicense(input: {
     key?: string;
     plan?: LicensePlan;
@@ -217,7 +294,7 @@ export class LicenseService {
     user?: { name: string; email: string; company?: string };
   }, actor?: AuditActor) {
     const key = normalizeLicenseKey(input.key);
-    const license = await this.repository.findByKey(key);
+    const license = await this.findByKeyTimingSafe(key);
     if (!license) throw new LicenseError("LIC_001", 404, "License not found");
 
     const expiresAt = input.expiresAt ? new Date(input.expiresAt) : undefined;
@@ -225,7 +302,7 @@ export class LicenseService {
       throw new LicenseError("LIC_DATE", 400, "expiresAt must be a valid date");
     }
 
-    const updated = await this.repository.updateDetails(key, {
+    const updated = await this.repository.updateDetails(license.key, {
       plan: input.plan,
       expiresAt,
       user: input.user
@@ -251,7 +328,7 @@ export class LicenseService {
       throw new LicenseError("LIC_FORMAT", 400, "Invalid license key format");
     }
 
-    const license = await this.repository.findByKey(payload.key);
+    const license = await this.findByKeyTimingSafe(payload.key);
     if (!license) throw new LicenseError("LIC_001", 404, "License not found");
     if (license.status === "revoked") throw new LicenseError("LIC_004", 403, "License revoked");
     if (license.deviceId && license.deviceId !== payload.device_id) {
@@ -261,7 +338,7 @@ export class LicenseService {
       throw new LicenseError("LIC_002", 402, "License expired");
     }
 
-    const verified = await this.repository.touchVerification(payload.key);
+    const verified = await this.repository.touchVerification(license.key);
     return { valid: true, ...(await toResponse(verified, this.packageRepository)) };
   }
 
@@ -271,7 +348,7 @@ export class LicenseService {
       throw new LicenseError("LIC_FORMAT", 400, "Invalid license key format");
     }
 
-    const license = await this.repository.findByKey(payload.key);
+    const license = await this.findByKeyTimingSafe(payload.key);
     if (!license) throw new LicenseError("LIC_001", 404, "License not found");
     if (license.status === "revoked") throw new LicenseError("LIC_004", 403, "License revoked");
     if (license.deviceId && license.deviceId !== payload.device_id) {
@@ -282,8 +359,8 @@ export class LicenseService {
     }
 
     const activated = license.deviceId
-      ? await this.repository.touchVerification(payload.key)
-      : await this.repository.activate(payload.key, {
+      ? await this.repository.touchVerification(license.key)
+      : await this.repository.activate(license.key, {
           deviceId: payload.device_id,
           hostname: payload.hostname,
           os: payload.os
@@ -298,11 +375,11 @@ export class LicenseService {
 
   async renew(keyInput: string, days: number, actor?: AuditActor) {
     const key = normalizeLicenseKey(keyInput);
-    const license = await this.repository.findByKey(key);
+    const license = await this.findByKeyTimingSafe(key);
     if (!license) throw new LicenseError("LIC_001", 404, "License not found");
     if (license.status === "revoked") throw new LicenseError("LIC_004", 403, "License revoked");
     const baseDate = license.expiresAt.getTime() > Date.now() ? license.expiresAt : new Date();
-    const renewed = await this.repository.renew(key, addDays(baseDate, days));
+    const renewed = await this.repository.renew(license.key, addDays(baseDate, days));
     await this.audit("license.renewed", renewed, { days, expiresAt: renewed.expiresAt.toISOString() }, actor);
     this.emailService?.sendLicenseRenewed(renewed);
     return toResponse(renewed, this.packageRepository);
@@ -310,26 +387,37 @@ export class LicenseService {
 
   async revoke(keyInput: string, actor?: AuditActor) {
     const key = normalizeLicenseKey(keyInput);
-    if (!(await this.repository.findByKey(key))) throw new LicenseError("LIC_001", 404, "License not found");
-    const revoked = await this.repository.revoke(key);
+    const license = await this.findByKeyTimingSafe(key);
+    if (!license) throw new LicenseError("LIC_001", 404, "License not found");
+    const revoked = await this.repository.revoke(license.key);
     await this.audit("license.revoked", revoked, undefined, actor);
     this.emailService?.sendLicenseRevoked(revoked);
     return toResponse(revoked, this.packageRepository);
   }
 
+  async softDelete(keyInput: string, retentionDays = 30, actor?: AuditActor) {
+    const key = normalizeLicenseKey(keyInput);
+    const license = await this.findByKeyTimingSafe(key);
+    if (!license) throw new LicenseError("LIC_001", 404, "License not found");
+    const retentionUntil = addDays(new Date(), retentionDays);
+    const deleted = await this.repository.softDelete(license.key, retentionUntil);
+    await this.audit("license.soft_deleted", deleted, { retentionDays, retentionUntil: retentionUntil.toISOString() }, actor);
+    return toResponse(deleted, this.packageRepository);
+  }
+
   async resetDevice(keyInput: string, actor?: AuditActor) {
     const key = normalizeLicenseKey(keyInput);
-    const license = await this.repository.findByKey(key);
+    const license = await this.findByKeyTimingSafe(key);
     if (!license) throw new LicenseError("LIC_001", 404, "License not found");
     if (license.status === "revoked") throw new LicenseError("LIC_004", 403, "License revoked");
-    const reset = await this.repository.resetDevice(key);
+    const reset = await this.repository.resetDevice(license.key);
     await this.audit("license.device_reset", reset, { previousDeviceId: license.deviceId }, actor);
     return toResponse(reset, this.packageRepository);
   }
 
   async status(keyInput: string) {
     const key = normalizeLicenseKey(keyInput);
-    const license = await this.repository.findByKey(key);
+    const license = await this.findByKeyTimingSafe(key);
     if (!license) throw new LicenseError("LIC_001", 404, "License not found");
     return toResponse(license, this.packageRepository);
   }
@@ -345,4 +433,42 @@ export class LicenseService {
       metadata
     });
   }
+
+  private async expiryReminderAuditKeys() {
+    if (!this.auditRepository) return new Set<string>();
+    const entries = await this.auditRepository.listRecent(50_000);
+    const sent = new Set<string>();
+    for (const entry of entries) {
+      if (entry.action !== "license.expiry_reminder_sent" || !entry.subjectId) continue;
+      const thresholdDays = reminderThresholdFromMetadata(entry.metadata);
+      if (!thresholdDays) continue;
+      sent.add(expiryReminderAuditKey(entry.subjectId, thresholdDays));
+    }
+    return sent;
+  }
+
+  private async findByKeyTimingSafe(key: string) {
+    const licenses = await this.repository.list();
+    return licenses.find((license) => timingSafeLicenseKeyEqual(license.key, key)) ?? null;
+  }
+}
+
+function daysUntilExpiry(expiresAt: Date, now: Date) {
+  const expiresDay = Date.UTC(expiresAt.getUTCFullYear(), expiresAt.getUTCMonth(), expiresAt.getUTCDate());
+  const nowDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((expiresDay - nowDay) / 86_400_000);
+}
+
+function isReminderDay(daysRemaining: number): daysRemaining is typeof EXPIRY_REMINDER_DAYS[number] {
+  return (EXPIRY_REMINDER_DAYS as readonly number[]).includes(daysRemaining);
+}
+
+function expiryReminderAuditKey(licenseKey: string, daysRemaining: number) {
+  return `${licenseKey}:${daysRemaining}`;
+}
+
+function reminderThresholdFromMetadata(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || !("thresholdDays" in metadata)) return null;
+  const value = (metadata as { thresholdDays?: unknown }).thresholdDays;
+  return typeof value === "number" ? value : null;
 }

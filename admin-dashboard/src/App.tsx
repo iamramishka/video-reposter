@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Check,
+  Clock,
   Copy,
   CreditCard,
   Download,
@@ -35,7 +36,7 @@ const activityPageSize = 6;
 
 type Plan = "starter" | "pro" | "enterprise";
 type Status = "pending" | "active" | "expired" | "revoked";
-type Tab = "dashboard" | "licenses" | "users" | "analytics" | "packages" | "payments" | "account";
+type Tab = "dashboard" | "licenses" | "users" | "analytics" | "packages" | "payments" | "logins" | "account";
 type AdminRole = "super_admin" | "admin" | "read_only";
 type ExpiryFilter = "all" | "1" | "7" | "14" | "30" | "expired";
 type DeviceFilter = "all" | "bound" | "unbound";
@@ -77,9 +78,13 @@ interface AuditLog {
 }
 
 interface Customer {
+  id: string;
   name: string;
   email: string;
   company: string | null;
+  disabled_at: string | null;
+  deleted_at: string | null;
+  retention_until: string | null;
   license_count: number;
   active_count: number;
   pending_count: number;
@@ -100,6 +105,27 @@ interface Analytics {
   daily_activations: { date: string; count: number }[];
 }
 
+interface ProcessingAnalytics {
+  total: number;
+  complete: number;
+  failed: number;
+  average_elapsed_ms: number;
+  average_throughput_mb_per_min: number;
+  presets: Record<string, number>;
+  top_error_codes: { error_code: string; count: number }[];
+  recent: Array<{
+    id: string;
+    job_id: string;
+    status: "complete" | "failed";
+    preset: string;
+    elapsed_ms: number;
+    throughput_mb_per_min: number | null;
+    input_size_bytes: number | null;
+    error_code: string | null;
+    created_at: string;
+  }>;
+}
+
 interface StripeInvoice {
   id: string;
   customer_email: string | null;
@@ -118,7 +144,13 @@ interface PaymentSummary {
   mrr?: number;
   arr?: number;
   activeSubscriptions?: number;
+  churnRate?: number;
+  churnedSubscriptions?: number;
   currency?: string;
+}
+
+interface SessionSettings {
+  timeoutMinutes: number;
 }
 
 const planLabels: Record<Plan, string> = {
@@ -139,14 +171,29 @@ const emptyAnalytics: Analytics = {
   daily_activations: []
 };
 
+const emptyProcessingAnalytics: ProcessingAnalytics = {
+  total: 0,
+  complete: 0,
+  failed: 0,
+  average_elapsed_ms: 0,
+  average_throughput_mb_per_min: 0,
+  presets: {},
+  top_error_codes: [],
+  recent: []
+};
+
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [token, setToken] = useState("");
   const [admin, setAdmin] = useState<{ email: string; role: AdminRole } | null>(null);
+  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState(480);
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
   const [licenses, setLicenses] = useState<License[]>([]);
   const [users, setUsers] = useState<Customer[]>([]);
   const [analytics, setAnalytics] = useState<Analytics>(emptyAnalytics);
+  const [processingAnalytics, setProcessingAnalytics] = useState<ProcessingAnalytics>(emptyProcessingAnalytics);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [loginAuditLogs, setLoginAuditLogs] = useState<AuditLog[]>([]);
   const [packages, setPackages] = useState<PackageDefinition[]>([]);
   const [query, setQuery] = useState("");
   const [userQuery, setUserQuery] = useState("");
@@ -173,6 +220,11 @@ export default function AdminDashboard() {
     count: 10,
     plan: "pro" as Plan,
     expiresAt: new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10)
+  });
+  const [userForm, setUserForm] = useState({
+    name: "",
+    email: "",
+    company: ""
   });
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
@@ -205,12 +257,19 @@ export default function AdminDashboard() {
     setMessage("");
     setBusy(true);
     try {
-      const body = await api<{ token: string; admin: { email: string; role: AdminRole } }>("/api/auth/login", {
+      const body = await api<{
+        token: string;
+        expires_at: string | null;
+        session: SessionSettings;
+        admin: { email: string; role: AdminRole };
+      }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password })
       });
       setToken(body.token);
       setAdmin(body.admin);
+      setSessionTimeoutMinutes(body.session.timeoutMinutes);
+      setSessionExpiresAt(body.expires_at);
       window.localStorage.setItem(tokenStorageKey, body.token);
       setPassword("");
       setMessage("");
@@ -224,17 +283,23 @@ export default function AdminDashboard() {
   async function loadDashboard() {
     setBusy(true);
     try {
-      const [licenseBody, auditBody, userBody, analyticsBody] = await Promise.all([
+      const [licenseBody, auditBody, loginAuditBody, userBody, analyticsBody, processingBody, sessionBody] = await Promise.all([
         api<{ licenses: License[] }>("/api/licenses"),
         api<{ audit_logs: AuditLog[] }>("/api/audit-logs?limit=100"),
+        api<{ audit_logs: AuditLog[] }>("/api/audit-logs/logins?limit=100"),
         api<{ users: Customer[] }>("/api/users"),
-        api<{ analytics: Analytics }>("/api/analytics")
+        api<{ analytics: Analytics }>("/api/analytics"),
+        api<{ processing: ProcessingAnalytics }>("/api/analytics/processing"),
+        api<{ session: SessionSettings }>("/api/auth/session-settings")
       ]);
       const packageBody = await api<{ packages: PackageDefinition[] }>("/api/packages");
       setLicenses(licenseBody.licenses ?? []);
       setAuditLogs(auditBody.audit_logs ?? []);
+      setLoginAuditLogs(loginAuditBody.audit_logs ?? []);
       setUsers(userBody.users ?? []);
       setAnalytics(analyticsBody.analytics ?? emptyAnalytics);
+      setProcessingAnalytics(processingBody.processing ?? emptyProcessingAnalytics);
+      setSessionTimeoutMinutes(sessionBody.session.timeoutMinutes);
       setPackages(packageBody.packages ?? []);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not load dashboard data");
@@ -287,6 +352,80 @@ export default function AdminDashboard() {
       setActiveTab("licenses");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not create bulk licenses");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createUser() {
+    setMessage("");
+    setBusy(true);
+    try {
+      const body = await api<{ user: Customer }>("/api/users", {
+        method: "POST",
+        body: JSON.stringify({
+          name: userForm.name,
+          email: userForm.email,
+          company: userForm.company || undefined
+        })
+      });
+      setMessage(`Created user ${body.user.email}.`);
+      setUserForm({ name: "", email: "", company: "" });
+      await loadDashboard();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create user");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateUser(user: Customer, patch: Partial<{ name: string; email: string; company: string | null }>) {
+    setMessage("");
+    setBusy(true);
+    try {
+      const body = await api<{ user: Customer }>(`/api/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch)
+      });
+      setMessage(`Updated ${body.user.email}.`);
+      await loadDashboard();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not update user");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setUserDisabled(user: Customer, disabled: boolean) {
+    setMessage("");
+    setBusy(true);
+    try {
+      await api(`/api/users/${user.id}/disabled`, {
+        method: "PATCH",
+        body: JSON.stringify({ disabled })
+      });
+      setMessage(`${disabled ? "Disabled" : "Enabled"} ${user.email}.`);
+      await loadDashboard();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not update user status");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function softDeleteUser(user: Customer) {
+    if (!window.confirm(`Soft-delete ${user.email}? Their licenses will be revoked and retained for 30 days.`)) return;
+    setMessage("");
+    setBusy(true);
+    try {
+      await api(`/api/users/${user.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ retentionDays: 30 })
+      });
+      setMessage(`Soft-deleted ${user.email}.`);
+      await loadDashboard();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not delete user");
     } finally {
       setBusy(false);
     }
@@ -372,13 +511,36 @@ export default function AdminDashboard() {
     }
   }
 
+  async function updateSessionTimeout() {
+    setMessage("");
+    setBusy(true);
+    try {
+      const body = await api<{ token: string; expires_at: string | null; session: SessionSettings }>("/api/auth/session-settings", {
+        method: "PATCH",
+        body: JSON.stringify({ timeoutMinutes: sessionTimeoutMinutes })
+      });
+      setToken(body.token);
+      setSessionTimeoutMinutes(body.session.timeoutMinutes);
+      setSessionExpiresAt(body.expires_at);
+      window.localStorage.setItem(tokenStorageKey, body.token);
+      setMessage("Session timeout updated.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not update session timeout");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function logout(nextMessage = "") {
     setToken("");
     setAdmin(null);
+    setSessionExpiresAt(null);
     setLicenses([]);
     setUsers([]);
     setAuditLogs([]);
+    setLoginAuditLogs([]);
     setAnalytics(emptyAnalytics);
+    setProcessingAnalytics(emptyProcessingAnalytics);
     window.localStorage.removeItem(tokenStorageKey);
     setMessage(nextMessage);
   }
@@ -445,14 +607,27 @@ export default function AdminDashboard() {
   useEffect(() => {
     const saved = window.localStorage.getItem(tokenStorageKey);
     if (saved) {
+      const parsed = parseTokenSession(saved);
       setToken(saved);
-      setAdmin(parseAdminFromToken(saved));
+      setAdmin(parsed?.admin ?? null);
+      setSessionExpiresAt(parsed?.expiresAt ?? null);
     }
   }, []);
 
   useEffect(() => {
     if (token) void loadDashboard();
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !sessionExpiresAt) return;
+    const msUntilExpiry = new Date(sessionExpiresAt).getTime() - Date.now();
+    if (msUntilExpiry <= 0) {
+      logout("Session expired. Please sign in again.");
+      return;
+    }
+    const timeout = window.setTimeout(() => logout("Session expired. Please sign in again."), Math.min(msUntilExpiry, 2_147_483_647));
+    return () => window.clearTimeout(timeout);
+  }, [token, sessionExpiresAt]);
 
   useEffect(() => {
     if (activeTab === "payments" && token && !paymentSummary) void loadPayments();
@@ -540,6 +715,7 @@ export default function AdminDashboard() {
         <NavButton tab="packages" activeTab={activeTab} onClick={setActiveTab} icon={<PackageCheck />} label="Packages" />
         <NavButton tab="analytics" activeTab={activeTab} onClick={setActiveTab} icon={<BarChart3 />} label="Analytics" />
         <NavButton tab="payments" activeTab={activeTab} onClick={setActiveTab} icon={<CreditCard />} label="Payments" />
+        <NavButton tab="logins" activeTab={activeTab} onClick={setActiveTab} icon={<Activity />} label="Login Audit" />
         <NavButton tab="account" activeTab={activeTab} onClick={setActiveTab} icon={<LockKeyhole />} label="Account" />
       </aside>
       <section className="workspace">
@@ -627,7 +803,20 @@ export default function AdminDashboard() {
         )}
 
         {activeTab === "users" && (
-          <UsersPage users={filteredUsers} query={userQuery} setQuery={setUserQuery} onExport={() => exportUsersCsv("customers", filteredUsers)} />
+          <UsersPage
+            users={filteredUsers}
+            query={userQuery}
+            setQuery={setUserQuery}
+            form={userForm}
+            setForm={setUserForm}
+            busy={busy}
+            canWrite={canWrite}
+            onCreate={createUser}
+            onUpdate={updateUser}
+            onSetDisabled={setUserDisabled}
+            onDelete={softDeleteUser}
+            onExport={() => exportUsersCsv("customers", filteredUsers)}
+          />
         )}
 
         {activeTab === "packages" && (
@@ -649,7 +838,7 @@ export default function AdminDashboard() {
         {activeTab === "analytics" && (
           <>
             <Stats analytics={analytics} />
-            <AnalyticsPage analytics={analytics} onExportPdf={exportAnalyticsPdf} />
+            <AnalyticsPage analytics={analytics} processing={processingAnalytics} onExportPdf={exportAnalyticsPdf} />
           </>
         )}
 
@@ -671,8 +860,22 @@ export default function AdminDashboard() {
           />
         )}
 
+        {activeTab === "logins" && (
+          <LoginAuditPage auditLogs={loginAuditLogs} />
+        )}
+
         {activeTab === "account" && (
-          <AccountPage form={passwordForm} setForm={setPasswordForm} busy={busy} onChangePassword={changePassword} />
+          <AccountPage
+            form={passwordForm}
+            setForm={setPasswordForm}
+            busy={busy}
+            sessionTimeoutMinutes={sessionTimeoutMinutes}
+            sessionExpiresAt={sessionExpiresAt}
+            setSessionTimeoutMinutes={setSessionTimeoutMinutes}
+            onChangePassword={changePassword}
+            onUpdateSessionTimeout={updateSessionTimeout}
+            canWrite={canWrite}
+          />
         )}
       </section>
     </main>
@@ -947,28 +1150,76 @@ function LicenseRow({ license, busy, onUpdate, onExtend, onReassign, onRevoke, o
   );
 }
 
-function UsersPage({ users, query, setQuery, onExport }: { users: Customer[]; query: string; setQuery: (value: string) => void; onExport: () => void }) {
+function UsersPage({
+  users,
+  query,
+  setQuery,
+  form,
+  setForm,
+  busy,
+  canWrite,
+  onCreate,
+  onUpdate,
+  onSetDisabled,
+  onDelete,
+  onExport
+}: {
+  users: Customer[];
+  query: string;
+  setQuery: (value: string) => void;
+  form: { name: string; email: string; company: string };
+  setForm: Dispatch<SetStateAction<{ name: string; email: string; company: string }>>;
+  busy: boolean;
+  canWrite: boolean;
+  onCreate: () => void;
+  onUpdate: (user: Customer, patch: Partial<{ name: string; email: string; company: string | null }>) => void;
+  onSetDisabled: (user: Customer, disabled: boolean) => void;
+  onDelete: (user: Customer) => void;
+  onExport: () => void;
+}) {
+  const createDisabled = busy || !canWrite || !form.name.trim() || !form.email.trim();
   return (
-    <section className="table-panel">
-      <div className="table-title">
-        <h2>Customers</h2>
-        <div className="table-tools">
-          <label className="search-box"><Search /><input placeholder="Search customers" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-          <button onClick={onExport}><Download /> Export</button>
+    <>
+      <section className="create-panel">
+        <h2>Create User</h2>
+        <div className="create-grid user-create-grid">
+          <input placeholder="Name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+          <input placeholder="Email" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
+          <input placeholder="Company" value={form.company} onChange={(event) => setForm({ ...form, company: event.target.value })} />
+          <button className="primary" onClick={onCreate} disabled={createDisabled}><UserRound /> Create User</button>
         </div>
-      </div>
-      <div className="user-table">
-        <div className="table-head">Customer</div>
-        <div className="table-head">Company</div>
-        <div className="table-head">Licenses</div>
-        <div className="table-head">Status Mix</div>
-        <div className="table-head">Latest Activation</div>
-        {users.map((user) => (
-          <CustomerRow key={user.email} user={user} />
-        ))}
-      </div>
-      {users.length === 0 && <div className="empty-state">No customers found.</div>}
-    </section>
+      </section>
+
+      <section className="table-panel">
+        <div className="table-title">
+          <h2>Customers</h2>
+          <div className="table-tools">
+            <label className="search-box"><Search /><input placeholder="Search customers" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+            <button onClick={onExport}><Download /> Export</button>
+          </div>
+        </div>
+        <div className="user-table">
+          <div className="table-head">Customer</div>
+          <div className="table-head">Company</div>
+          <div className="table-head">Licenses</div>
+          <div className="table-head">Status Mix</div>
+          <div className="table-head">Latest Activation</div>
+          <div className="table-head">Actions</div>
+          {users.map((user) => (
+            <CustomerRow
+              key={user.id}
+              user={user}
+              busy={busy}
+              canWrite={canWrite}
+              onUpdate={onUpdate}
+              onSetDisabled={onSetDisabled}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+        {users.length === 0 && <div className="empty-state">No customers found.</div>}
+      </section>
+    </>
   );
 }
 
@@ -1019,11 +1270,34 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
   return <div className="info-block"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function CustomerRow({ user }: { user: Customer }) {
+function CustomerRow({ user, busy, canWrite, onUpdate, onSetDisabled, onDelete }: {
+  user: Customer;
+  busy: boolean;
+  canWrite: boolean;
+  onUpdate: (user: Customer, patch: Partial<{ name: string; email: string; company: string | null }>) => void;
+  onSetDisabled: (user: Customer, disabled: boolean) => void;
+  onDelete: (user: Customer) => void;
+}) {
+  const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email);
+  const [company, setCompany] = useState(user.company ?? "");
+  const changed = name !== user.name || email !== user.email || company !== (user.company ?? "");
+  const disabled = busy || !canWrite || !name.trim() || !email.trim();
+
+  useEffect(() => {
+    setName(user.name);
+    setEmail(user.email);
+    setCompany(user.company ?? "");
+  }, [user.id, user.name, user.email, user.company]);
+
   return (
     <>
-      <div><strong>{user.name}</strong><small>{user.email}</small></div>
-      <div>{user.company ?? "No company"}</div>
+      <div className="user-edit-cell">
+        <input value={name} onChange={(event) => setName(event.target.value)} disabled={!canWrite} />
+        <input value={email} type="email" onChange={(event) => setEmail(event.target.value)} disabled={!canWrite} />
+        {user.disabled_at && <small>Disabled {new Date(user.disabled_at).toLocaleDateString()}</small>}
+      </div>
+      <div><input value={company} placeholder="No company" onChange={(event) => setCompany(event.target.value)} disabled={!canWrite} /></div>
       <div><strong>{user.license_count}</strong></div>
       <div className="status-mix">
         <span>Active {user.active_count}</span>
@@ -1032,6 +1306,11 @@ function CustomerRow({ user }: { user: Customer }) {
         <span>Revoked {user.revoked_count}</span>
       </div>
       <div>{user.latest_activation ? new Date(user.latest_activation).toLocaleString() : "No activation"}</div>
+      <div className="actions">
+        <button title="Save user" onClick={() => onUpdate(user, { name, email, company: company || null })} disabled={!changed || disabled}><Save /></button>
+        <button title={user.disabled_at ? "Enable user" : "Disable user"} onClick={() => onSetDisabled(user, !user.disabled_at)} disabled={busy || !canWrite}>{user.disabled_at ? <Check /> : <Ban />}</button>
+        <button title="Soft-delete user" onClick={() => onDelete(user)} disabled={busy || !canWrite}><Ban /></button>
+      </div>
     </>
   );
 }
@@ -1122,7 +1401,7 @@ function DonutChart({ plans, total }: { plans: Record<Plan, number>; total: numb
   );
 }
 
-function AnalyticsPage({ analytics, onExportPdf }: { analytics: Analytics; onExportPdf: () => void }) {
+function AnalyticsPage({ analytics, processing, onExportPdf }: { analytics: Analytics; processing: ProcessingAnalytics; onExportPdf: () => void }) {
   return (
     <section className="analytics-panel">
       <div className="analytics-panel-header">
@@ -1134,6 +1413,11 @@ function AnalyticsPage({ analytics, onExportPdf }: { analytics: Analytics; onExp
         <Metric label="Revoked" value={analytics.revoked} icon={<Ban />} />
         <Metric label="Expired" value={analytics.expired} icon={<RefreshCcw />} />
       </div>
+      <div className="metric-grid processing-metrics">
+        <Metric label="Processed Jobs" value={processing.total} icon={<Activity />} />
+        <Metric label="Completed" value={processing.complete} icon={<Check />} />
+        <Metric label="Failed" value={processing.failed} icon={<Ban />} />
+      </div>
       <div className="analytics-charts">
         <div className="chart-section">
           <h2>Activations Over Time</h2>
@@ -1142,6 +1426,30 @@ function AnalyticsPage({ analytics, onExportPdf }: { analytics: Analytics; onExp
         <div className="chart-section">
           <h2>License Distribution</h2>
           <DonutChart plans={analytics.plans} total={analytics.total} />
+        </div>
+      </div>
+      <div className="processing-grid">
+        <div className="chart-section">
+          <h2>Processing Performance</h2>
+          <div className="processing-summary">
+            <InfoBlock label="Avg elapsed" value={formatDuration(processing.average_elapsed_ms)} />
+            <InfoBlock label="Avg throughput" value={`${processing.average_throughput_mb_per_min} MB/min`} />
+          </div>
+        </div>
+        <div className="chart-section">
+          <h2>Top Error Codes</h2>
+          {processing.top_error_codes.length > 0 ? (
+            <div className="error-code-list">
+              {processing.top_error_codes.map((entry) => (
+                <div key={entry.error_code}>
+                  <span>{entry.error_code}</span>
+                  <strong>{entry.count}</strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="empty-state">No processing errors recorded.</p>
+          )}
         </div>
       </div>
     </section>
@@ -1328,23 +1636,87 @@ function PackageAllocationRow({ license, busy, onUpdate }: {
   );
 }
 
-function AccountPage({ form, setForm, busy, onChangePassword }: {
+function LoginAuditPage({ auditLogs }: { auditLogs: AuditLog[] }) {
+  return (
+    <section className="table-panel">
+      <div className="table-title">
+        <h2>Admin Login Audit</h2>
+        <span className="role-pill">{auditLogs.length} events</span>
+      </div>
+      {auditLogs.length > 0 ? (
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Role</th>
+            </tr>
+          </thead>
+          <tbody>
+            {auditLogs.map((entry) => (
+              <tr key={entry.id}>
+                <td>{new Date(entry.created_at).toLocaleString()}</td>
+                <td>{loginAuditEmail(entry)}</td>
+                <td><span className={`status-pill ${entry.action === "admin.login" ? "active" : "revoked"}`}>{entry.action === "admin.login" ? "Success" : "Failed"}</span></td>
+                <td>{loginAuditRole(entry)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="empty-state">No login audit events recorded yet.</p>
+      )}
+    </section>
+  );
+}
+
+function AccountPage({ form, setForm, busy, sessionTimeoutMinutes, sessionExpiresAt, setSessionTimeoutMinutes, onChangePassword, onUpdateSessionTimeout, canWrite }: {
   form: { currentPassword: string; newPassword: string; confirmPassword: string };
   setForm: Dispatch<SetStateAction<{ currentPassword: string; newPassword: string; confirmPassword: string }>>;
   busy: boolean;
+  sessionTimeoutMinutes: number;
+  sessionExpiresAt: string | null;
+  setSessionTimeoutMinutes: Dispatch<SetStateAction<number>>;
   onChangePassword: () => void;
+  onUpdateSessionTimeout: () => void;
+  canWrite: boolean;
 }) {
   const disabled = busy || !form.currentPassword || form.newPassword.length < 10 || form.newPassword !== form.confirmPassword;
+  const timeoutValid = [15, 30, 60, 120, 240, 480, 720, 1440].includes(sessionTimeoutMinutes);
   return (
-    <section className="account-panel">
-      <h2>Change Password</h2>
-      <div className="password-grid">
-        <input type="password" placeholder="Current password" value={form.currentPassword} onChange={(event) => setForm({ ...form, currentPassword: event.target.value })} />
-        <input type="password" placeholder="New password" value={form.newPassword} onChange={(event) => setForm({ ...form, newPassword: event.target.value })} />
-        <input type="password" placeholder="Confirm new password" value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })} />
-        <button className="primary" onClick={onChangePassword} disabled={disabled}><Check /> Change Password</button>
-      </div>
-    </section>
+    <div className="account-grid">
+      <section className="account-panel">
+        <h2>Change Password</h2>
+        <div className="password-grid">
+          <input type="password" placeholder="Current password" value={form.currentPassword} onChange={(event) => setForm({ ...form, currentPassword: event.target.value })} />
+          <input type="password" placeholder="New password" value={form.newPassword} onChange={(event) => setForm({ ...form, newPassword: event.target.value })} />
+          <input type="password" placeholder="Confirm new password" value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })} />
+          <button className="primary" onClick={onChangePassword} disabled={disabled}><Check /> Change Password</button>
+        </div>
+      </section>
+
+      <section className="account-panel">
+        <h2>Session Timeout</h2>
+        <div className="session-summary">
+          <Clock />
+          <span>Current session expires {formatSessionExpiry(sessionExpiresAt)}</span>
+        </div>
+        <div className="password-grid session-grid">
+          <select value={sessionTimeoutMinutes} onChange={(event) => setSessionTimeoutMinutes(Number(event.target.value))} disabled={!canWrite}>
+            <option value={15}>15 minutes</option>
+            <option value={30}>30 minutes</option>
+            <option value={60}>1 hour</option>
+            <option value={120}>2 hours</option>
+            <option value={240}>4 hours</option>
+            <option value={480}>8 hours</option>
+            <option value={720}>12 hours</option>
+            <option value={1440}>24 hours</option>
+          </select>
+          <button className="primary" onClick={onUpdateSessionTimeout} disabled={busy || !canWrite || !timeoutValid}><Save /> Save Timeout</button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1480,6 +1852,7 @@ function PaymentsPage({ summary, invoices, checkoutEmail, checkoutPlan, checkout
         <div className="stat"><span className="stat-value">{summary?.activeSubscriptions ?? "—"}</span><span className="stat-label">Active Subscribers</span></div>
         <div className="stat"><span className="stat-value">{summary?.mrr !== undefined ? `$${summary.mrr.toFixed(2)}` : "—"}</span><span className="stat-label">MRR</span></div>
         <div className="stat"><span className="stat-value">{summary?.arr !== undefined ? `$${summary.arr.toFixed(2)}` : "—"}</span><span className="stat-label">ARR</span></div>
+        <div className="stat"><span className="stat-value">{summary?.churnRate !== undefined ? `${summary.churnRate.toFixed(2)}%` : "—"}</span><span className="stat-label">30-Day Churn</span></div>
       </div>
 
       <section className="create-panel">
@@ -1559,7 +1932,7 @@ function PaymentsPage({ summary, invoices, checkoutEmail, checkoutPlan, checkout
 }
 
 function pageTitle(tab: Tab) {
-  return ({ dashboard: "Admin Dashboard", licenses: "Licenses", users: "Users", analytics: "Analytics", packages: "Packages", payments: "Payments", account: "Account" } satisfies Record<Tab, string>)[tab];
+  return ({ dashboard: "Admin Dashboard", licenses: "Licenses", users: "Users", analytics: "Analytics", packages: "Packages", payments: "Payments", logins: "Login Audit", account: "Account" } satisfies Record<Tab, string>)[tab];
 }
 
 function pageSubtitle(tab: Tab) {
@@ -1570,6 +1943,7 @@ function pageSubtitle(tab: Tab) {
     packages: "Manually allocate Starter, Pro, or Enterprise to licenses.",
     analytics: "License, activation, and plan performance.",
     payments: "Stripe revenue summary, checkout links, and invoice history.",
+    logins: "Admin sign-in attempts and session events.",
     account: "Update admin sign-in security."
   } satisfies Record<Tab, string>)[tab];
 }
@@ -1582,14 +1956,37 @@ function formatRole(role: AdminRole) {
   return role.replace("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function parseAdminFromToken(token: string): { email: string; role: AdminRole } | null {
+function loginAuditEmail(entry: AuditLog) {
+  const metadataEmail = entry.metadata?.email;
+  return typeof metadataEmail === "string" ? metadataEmail : entry.admin_user_email ?? "Unknown";
+}
+
+function loginAuditRole(entry: AuditLog) {
+  const role = entry.metadata?.role;
+  return typeof role === "string" ? formatRole(role as AdminRole) : "—";
+}
+
+function parseTokenSession(token: string): { admin: { email: string; role: AdminRole }; expiresAt: string | null } | null {
   try {
-    const payload = JSON.parse(atob(token.split(".")[1] ?? "")) as { email?: string; role?: AdminRole };
+    const payload = JSON.parse(atob(token.split(".")[1] ?? "")) as { email?: string; role?: AdminRole; exp?: number };
     if (!payload.email || !payload.role) return null;
-    return { email: payload.email, role: payload.role };
+    return {
+      admin: { email: payload.email, role: payload.role },
+      expiresAt: typeof payload.exp === "number" ? new Date(payload.exp * 1000).toISOString() : null
+    };
   } catch {
     return null;
   }
+}
+
+function formatSessionExpiry(value: string | null) {
+  if (!value) return "when the token expires";
+  return new Date(value).toLocaleString();
+}
+
+function formatDuration(ms: number) {
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
 }
 
 function matchesExpiryWindow(license: License, filter: ExpiryFilter) {
@@ -1631,11 +2028,15 @@ function exportLicensesCsv(name: string, rows: License[]) {
 
 function exportUsersCsv(name: string, rows: Customer[]) {
   downloadCsv(name, [
-    ["name", "email", "company", "license_count", "active_count", "pending_count", "expired_count", "revoked_count", "latest_activation"],
+    ["id", "name", "email", "company", "disabled_at", "deleted_at", "retention_until", "license_count", "active_count", "pending_count", "expired_count", "revoked_count", "latest_activation"],
     ...rows.map((user) => [
+      user.id,
       user.name,
       user.email,
       user.company ?? "",
+      user.disabled_at ?? "",
+      user.deleted_at ?? "",
+      user.retention_until ?? "",
       user.license_count,
       user.active_count,
       user.pending_count,

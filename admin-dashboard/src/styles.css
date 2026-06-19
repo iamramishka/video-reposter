@@ -324,6 +324,12 @@ header {
   gap: 16px;
 }
 
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
+}
+
 .panel-heading {
   display: flex;
   align-items: center;
@@ -519,7 +525,7 @@ header {
 }
 
 .user-table {
-  grid-template-columns: minmax(200px, 1.2fr) minmax(140px, 0.8fr) 110px minmax(220px, 1.1fr) minmax(170px, 1fr);
+  grid-template-columns: minmax(210px, 1.2fr) minmax(150px, 0.8fr) 90px minmax(210px, 1fr) minmax(160px, 0.9fr) minmax(130px, 0.7fr);
 }
 
 .license-table > div,
@@ -555,6 +561,21 @@ header {
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
+}
+
+.user-table input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.user-edit-cell {
+  display: grid;
+  gap: 8px;
+}
+
+.user-create-grid {
+  grid-template-columns: repeat(3, minmax(160px, 1fr)) auto;
 }
 
 .table-head {
@@ -662,6 +683,10 @@ small {
   gap: 14px;
 }
 
+.processing-metrics {
+  margin-top: 14px;
+}
+
 .metric-card {
   display: grid;
   gap: 8px;
@@ -725,6 +750,35 @@ small {
   grid-template-columns: 1fr 1fr;
   gap: 18px;
   margin-top: 22px;
+}
+
+.processing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 18px;
+  margin-top: 22px;
+}
+
+.processing-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.error-code-list {
+  display: grid;
+  gap: 10px;
+}
+
+.error-code-list div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fbff;
 }
 
 .chart-section h2 {
@@ -797,6 +851,23 @@ small {
   grid-template-columns: repeat(3, minmax(180px, 1fr)) auto;
   gap: 12px;
   margin-top: 16px;
+}
+
+.session-grid {
+  grid-template-columns: minmax(180px, 260px) auto;
+}
+
+.session-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  color: #475569;
+  font-weight: 800;
+}
+
+.session-summary svg {
+  color: #2563eb;
 }
 
 .empty-state {
@@ -978,7 +1049,9 @@ small {
   }
 
   .metric-grid,
-  .password-grid {
+  .password-grid,
+  .processing-grid,
+  .processing-summary {
     grid-template-columns: 1fr;
   }
 
@@ -1030,7 +1103,9 @@ small {
   .metric-grid,
   .password-grid,
   .detail-grid,
-  .analytics-charts {
+  .analytics-charts,
+  .processing-grid,
+  .processing-summary {
     grid-template-columns: 1fr;
   }
 

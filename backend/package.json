@@ -9,6 +9,7 @@
     "build": "prisma generate && tsc -p tsconfig.json",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "start": "node dist/src/server.js",
+    "license:reminders": "tsx src/jobs/sendExpiryReminders.ts",
     "pretest": "prisma generate",
     "test": "vitest run",
     "db:generate": "prisma generate",

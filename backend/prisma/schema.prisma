@@ -27,13 +27,18 @@ enum AdminRole {
 }
 
 model User {
-  id        String    @id @default(cuid())
-  name      String
-  email     String    @unique
-  company   String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  licenses  License[]
+  id             String    @id @default(cuid())
+  name           String
+  email          String    @unique
+  company        String?
+  disabledAt     DateTime?
+  deletedAt      DateTime?
+  retentionUntil DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  licenses       License[]
+
+  @@index([deletedAt])
 }
 
 model License {
@@ -49,12 +54,15 @@ model License {
   lastVerifiedAt DateTime?
   userId         String?
   user           User?         @relation(fields: [userId], references: [id])
+  deletedAt      DateTime?
+  retentionUntil DateTime?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   auditLogs      AuditLog[]
 
   @@index([status])
   @@index([expiresAt])
+  @@index([deletedAt])
 }
 
 model PackageDefinition {
@@ -89,5 +97,22 @@ model AuditLog {
   createdAt   DateTime   @default(now())
 
   @@index([action])
+  @@index([createdAt])
+}
+
+model ProcessingTelemetry {
+  id                 String   @id @default(cuid())
+  jobId              String   @unique
+  status             String
+  preset             String
+  elapsedMs          Int
+  throughputMbPerMin Float?
+  inputSizeBytes     Float?
+  errorCode          String?
+  createdAt          DateTime @default(now())
+
+  @@index([status])
+  @@index([preset])
+  @@index([errorCode])
   @@index([createdAt])
 }
