@@ -1,4 +1,4 @@
-export type PlatformPresetId = "instagram-reel" | "youtube-short" | "tiktok" | "twitter-video" | "facebook-reel";
+export type PlatformPresetId = string;
 
 export type VideoCodec = "libx264" | "libx265" | "h264_nvenc" | "h264_amf" | "h264_qsv";
 export type OutputFormat = "mp4" | "mkv" | "mov";
@@ -57,6 +57,7 @@ export type PlatformPreset = {
   id: PlatformPresetId;
   name: string;
   settings: OutputSettings;
+  custom?: boolean;
 };
 
 export type ImportedVideoFile = {
@@ -97,6 +98,60 @@ export const platformPresets: PlatformPreset[] = [
     settings: { width: 1080, height: 1920, fps: 30, videoBitrate: "5M", audioBitrate: "128k", codec: "libx265", maxDurationSeconds: 90 }
   }
 ];
+
+export type QualityLevel = "preset" | "low" | "medium" | "high";
+
+export type OutputOverrides = {
+  quality?: QualityLevel;
+  width?: number;
+  height?: number;
+};
+
+export const qualityLevels: QualityLevel[] = ["preset", "low", "medium", "high"];
+
+const qualityProfiles: Record<Exclude<QualityLevel, "preset">, { crf: number; preset: string }> = {
+  low: { crf: 30, preset: "veryfast" },
+  medium: { crf: 23, preset: "fast" },
+  high: { crf: 18, preset: "slow" }
+};
+
+// FFmpeg with yuv420p requires even pixel dimensions; clamp to a sane 16..7680 range.
+export function normalizeDimension(value?: number): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const rounded = Math.round(value);
+  if (rounded < 16 || rounded > 7680) return undefined;
+  return rounded % 2 === 0 ? rounded : rounded + 1;
+}
+
+export function buildOutputOverrides(quality: QualityLevel, widthInput?: string, heightInput?: string): OutputOverrides {
+  return {
+    quality,
+    width: parsePositiveInt(widthInput),
+    height: parsePositiveInt(heightInput)
+  };
+}
+
+function parsePositiveInt(value?: string): number | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : undefined;
+}
+
+export function applyOutputOverrides(settings: OutputSettings, overrides?: OutputOverrides): OutputSettings {
+  if (!overrides) return settings;
+  let next: OutputSettings = { ...settings };
+
+  if (overrides.quality && overrides.quality !== "preset") {
+    const profile = qualityProfiles[overrides.quality];
+    next = { ...next, crf: profile.crf, preset: profile.preset };
+  }
+
+  const width = normalizeDimension(overrides.width);
+  const height = normalizeDimension(overrides.height);
+  if (width && height) next = { ...next, width, height };
+
+  return next;
+}
 
 export function buildFfmpegArgs(job: FfmpegJob) {
   const output = normalizeOutputSettings(job.output);

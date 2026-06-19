@@ -8,14 +8,15 @@ import { LicenseClient } from "./licenseClient.js";
 import { appendProcessingLog, getProcessingLogPath, trimProcessingLogs } from "./processingLog.js";
 import { ProcessingService } from "./processingService.js";
 import { AutoUpdateService } from "./autoUpdateService.js";
+import { isProcessingTelemetryPayload } from "../shared/telemetry.js";
 import { checkDiskSpace } from "./diskMonitor.js";
 import { getStableDeviceId, readLicenseCache, writeLicenseCache } from "./licenseCache.js";
 import { isLicenseKey, normalizeLicenseKey, stateFromCache } from "../shared/license.js";
 import { productName } from "../shared/branding.js";
-import { buildFfmpegCommand, isSupportedVideoPath, platformPresets, renderOutputFileName } from "../shared/processing.js";
+import { applyOutputOverrides, buildFfmpegCommand, isSupportedVideoPath, platformPresets, renderOutputFileName } from "../shared/processing.js";
 import { invalidVideoFailure, outputFolderFailure } from "../shared/processingFailure.js";
 import type { ProcessingJobRequest } from "./processingService.js";
-import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, TransformSettings } from "../shared/processing.js";
+import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, OutputOverrides, TransformSettings } from "../shared/processing.js";
 
 const serverUrl = process.env.VITE_LICENSE_SERVER_URL ?? "https://video-reposter.vercel.app";
 const licenseClient = new LicenseClient(serverUrl);
@@ -195,7 +196,7 @@ app.whenReady().then(() => {
   ipcMain.handle("processing:probeFile", (_event, inputPath: string) => processingService.probeFile(inputPath));
   ipcMain.handle("processing:buildCommand", (_event, job: FfmpegJob) => buildFfmpegCommand(job));
   ipcMain.handle("processing:startJob", (_event, request: ProcessingJobRequest) => processingService.startJob(request));
-  ipcMain.handle("processing:startFile", async (_event, inputPath: string, presetId = "instagram-reel", outputDir?: string, transforms?: TransformSettings, outputNaming?: OutputNamingOptions) => {
+  ipcMain.handle("processing:startFile", async (_event, inputPath: string, presetId = "instagram-reel", outputDir?: string, transforms?: TransformSettings, outputNaming?: OutputNamingOptions, outputOverrides?: OutputOverrides) => {
     const preset = platformPresets.find((item) => item.id === presetId) ?? platformPresets.find((item) => item.id === "instagram-reel");
     if (!preset) throw new Error("Default processing preset is missing.");
     let outputPath: string;
@@ -216,7 +217,7 @@ app.whenReady().then(() => {
       ...processingService.startJob({
         inputPath,
         outputPath,
-        output: preset.settings,
+        output: applyOutputOverrides(preset.settings, outputOverrides),
         transforms,
         durationSeconds: probe.durationSeconds,
         inputSizeBytes
@@ -227,6 +228,9 @@ app.whenReady().then(() => {
     };
   });
   ipcMain.handle("processing:stopJob", (_event, id: string) => processingService.stopJob(id));
+  ipcMain.handle("telemetry:processing", (_event, licenseKey: string, payload: unknown) =>
+    isProcessingTelemetryPayload(payload) ? licenseClient.sendProcessingTelemetry(licenseKey, payload) : false
+  );
   ipcMain.handle("files:checkDiskSpace", (_event, targetPath: string) => checkDiskSpace(targetPath));
 
   ipcMain.handle("files:selectVideos", async (event) => {

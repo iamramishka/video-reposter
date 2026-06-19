@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyOutputOverrides,
   buildFfmpegArgs,
   buildFfmpegCommand,
+  buildOutputOverrides,
   isSupportedVideoPath,
+  normalizeDimension,
   parseFfmpegProgress,
   platformPresets,
   renderOutputFileName
 } from "../src/shared/processing";
+import type { OutputSettings } from "../src/shared/processing";
 
 describe("processing command builder", () => {
   it("builds a standard platform preset command", () => {
@@ -200,5 +204,57 @@ describe("processing helpers", () => {
     });
     expect(parseFfmpegProgress("no timing here", 120)).toBeNull();
     expect(parseFfmpegProgress("time=00:10:00.00", 100)).toEqual({ currentSeconds: 600, progress: 99 });
+  });
+});
+
+describe("output overrides", () => {
+  const base: OutputSettings = { width: 1080, height: 1920, fps: 30, videoBitrate: "4M", audioBitrate: "128k", codec: "libx264", crf: 23, preset: "fast" };
+
+  it("returns the original settings when no overrides are given", () => {
+    expect(applyOutputOverrides(base)).toEqual(base);
+    expect(applyOutputOverrides(base, { quality: "preset" })).toEqual(base);
+  });
+
+  it("maps quality levels to crf and encoder preset", () => {
+    expect(applyOutputOverrides(base, { quality: "low" })).toMatchObject({ crf: 30, preset: "veryfast" });
+    expect(applyOutputOverrides(base, { quality: "medium" })).toMatchObject({ crf: 23, preset: "fast" });
+    expect(applyOutputOverrides(base, { quality: "high" })).toMatchObject({ crf: 18, preset: "slow" });
+  });
+
+  it("applies a custom resolution only when both dimensions are valid", () => {
+    expect(applyOutputOverrides(base, { width: 1280, height: 720 })).toMatchObject({ width: 1280, height: 720 });
+    // A single dimension is ignored (aspect ratio cannot be inferred safely).
+    expect(applyOutputOverrides(base, { width: 1280 })).toMatchObject({ width: 1080, height: 1920 });
+  });
+
+  it("normalizes dimensions to even values within range", () => {
+    expect(normalizeDimension(1281)).toBe(1282);
+    expect(normalizeDimension(720)).toBe(720);
+    expect(normalizeDimension(8)).toBeUndefined();
+    expect(normalizeDimension(99999)).toBeUndefined();
+    expect(normalizeDimension(undefined)).toBeUndefined();
+    expect(normalizeDimension(Number.NaN)).toBeUndefined();
+  });
+
+  it("buildOutputOverrides parses string dimensions into numbers", () => {
+    expect(buildOutputOverrides("preset", "1280", "720")).toMatchObject({ quality: "preset", width: 1280, height: 720 });
+    expect(buildOutputOverrides("high", "1920", "1080")).toMatchObject({ quality: "high", width: 1920, height: 1080 });
+  });
+
+  it("buildOutputOverrides returns undefined dims for blank or invalid strings", () => {
+    const result = buildOutputOverrides("medium", "", "");
+    expect(result.width).toBeUndefined();
+    expect(result.height).toBeUndefined();
+  });
+
+  it("buildOutputOverrides returns undefined dims for non-numeric strings", () => {
+    const result = buildOutputOverrides("low", "abc", "xyz");
+    expect(result.width).toBeUndefined();
+    expect(result.height).toBeUndefined();
+  });
+
+  it("buildOutputOverrides returns undefined dims for negative or zero values", () => {
+    expect(buildOutputOverrides("preset", "-100", "0").width).toBeUndefined();
+    expect(buildOutputOverrides("preset", "-100", "0").height).toBeUndefined();
   });
 });

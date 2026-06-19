@@ -123,16 +123,16 @@ it green. Then push and open a PR per Section 7.
 
 | # | Task | Source req | Status |
 |---|------|-----------|--------|
-| A1 | Drag-and-drop polish across all supported views | 1.2 | [ ] |
-| A2 | Import summary with total size and validation status | 1.2 | [ ] |
-| A3 | Output folder picker polish | 1.4 | [ ] |
-| A4 | Quality presets (low/medium/high → encoder settings) | 1.4 | [ ] |
-| A5 | Custom resolution UI | 1.4 | [ ] |
-| A6 | Overall ETA across the processing queue | 1.5 | [ ] |
-| A7 | Auto-open output folder option | 1.5 | [ ] |
-| A8 | Fully custom platform preset editor | 1.6 | [ ] |
-| A9 | Richer device-conflict recovery UX | 1.1 | [ ] |
-| A10 | **Telemetry (desktop half):** POST each finished job's stats to the backend per Section 6 | 2.4 | [ ] |
+| A1 | Drag-and-drop polish across all supported views | 1.2 | [x] |
+| A2 | Import summary with total size and validation status | 1.2 | [x] |
+| A3 | Output folder picker polish | 1.4 | [x] |
+| A4 | Quality presets (low/medium/high → encoder settings) | 1.4 | [x] |
+| A5 | Custom resolution UI | 1.4 | [x] |
+| A6 | Overall ETA across the processing queue | 1.5 | [x] |
+| A7 | Auto-open output folder option | 1.5 | [x] |
+| A8 | Fully custom platform preset editor | 1.6 | [x] |
+| A9 | Richer device-conflict recovery UX | 1.1 | [x] |
+| A10 | **Telemetry (desktop half):** POST each finished job's stats to the backend per Section 6 | 2.4 | [x] |
 
 ### Lane B — Codex · `backend/**` + `admin-dashboard/**` · branch `feat/backend-admin-enhancements`
 
@@ -226,7 +226,7 @@ appears, it means a lane edited outside its domain: stop and fix the boundary vi
 
 ## 8. Definition of Done (this parallel effort)
 
-- [ ] All Lane A boxes `[x]`; `npm run ship` green in the desktop worktree.
+- [x] All Lane A boxes `[x]`; `npm run ship` green in the desktop worktree.
 - [x] All Lane B boxes `[x]`; `npm run ship` green in the backend worktree.
 - [ ] Telemetry end-to-end verified (desktop POST → backend store → admin display).
 - [ ] Both PRs reviewed; security review passed on B1–B5/B10/B11.

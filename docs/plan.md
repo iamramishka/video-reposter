@@ -90,8 +90,8 @@ self-marking checkboxes live in **[docs/parallel-execution-plan.md](parallel-exe
 
 **Lane A — Claude** · `desktop-app/**` · branch `feat/desktop-enhancements`
 
-- [ ] A1–A9 desktop UX/processing: drag-drop polish, import summary, output picker, quality presets, custom resolution, overall ETA, auto-open output, custom preset editor, device-conflict recovery
-- [ ] A10 telemetry (desktop half): post finished-job stats to backend per interface contract
+- [x] A1–A9 desktop UX/processing: drag-drop polish, import summary, output picker, quality presets, custom resolution, overall ETA, auto-open output, custom preset editor, device-conflict recovery
+- [x] A10 telemetry (desktop half): post finished-job stats to backend per interface contract
 
 **Lane B — Codex** · `backend/**` + `admin-dashboard/**` · branch `feat/backend-admin-enhancements`
 

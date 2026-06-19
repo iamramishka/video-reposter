@@ -1,4 +1,6 @@
 import type { CachedLicense, DeviceInfo } from "../shared/license.js";
+import { isProcessingTelemetryPayload } from "../shared/telemetry.js";
+import type { ProcessingTelemetryPayload } from "../shared/telemetry.js";
 
 export interface ActivationResult {
   ok: boolean;
@@ -47,6 +49,24 @@ export class LicenseClient {
       return { ok: true, license: body as CachedLicense };
     } catch {
       return { ok: false, code: "LIC_005", message: "License server unreachable." };
+    }
+  }
+
+  async sendProcessingTelemetry(licenseKey: string, payload: ProcessingTelemetryPayload): Promise<boolean> {
+    if (!licenseKey || !isProcessingTelemetryPayload(payload)) return false;
+    try {
+      const response = await fetch(`${this.serverUrl}/api/telemetry/processing`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${licenseKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5000)
+      });
+      return response.ok || response.status === 202;
+    } catch {
+      return false;
     }
   }
 }

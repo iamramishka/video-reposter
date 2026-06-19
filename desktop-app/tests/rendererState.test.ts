@@ -4,9 +4,12 @@ import {
   buildQueueItems,
   buildQueueItemsFromImports,
   canRetryHistoryItem,
+  customPresetsStorageKey,
   currentBatchSettingsFromPreferences,
+  estimateQueueEtaSeconds,
   filterHistoryItems,
   formatDuration,
+  formatEta,
   formatVideoFormat,
   getFinishedQueueItems,
   getNewBatchItems,
@@ -17,12 +20,15 @@ import {
   isNewBatchLocked,
   queueStatusLabel,
   restoredDefaultPreferences,
+  summarizeImport,
   historyStorageKey,
+  loadCustomPresets,
   loadHistory,
   loadPreferences,
   loadQueue,
   preferencesStorageKey,
   queueStorageKey,
+  saveCustomPresets,
   saveHistory,
   savePreferences,
   saveQueue,
@@ -148,7 +154,8 @@ describe("renderer state persistence", () => {
         speedPercent: 50,
         fadeInSeconds: 10,
         fadeOutSeconds: 0
-      }
+      },
+      autoOpenOutput: false
     });
   });
 
@@ -169,6 +176,14 @@ describe("renderer state persistence", () => {
     expect(loadPreferences(storage).defaultPresetId).toBe("facebook-reel");
   });
 
+  it("preserves the auto-open-output preference and coerces non-booleans to false", () => {
+    const on = memoryStorage({ [preferencesStorageKey]: JSON.stringify({ ...defaultPreferences, autoOpenOutput: true }) });
+    expect(loadPreferences(on).autoOpenOutput).toBe(true);
+
+    const coerced = memoryStorage({ [preferencesStorageKey]: JSON.stringify({ autoOpenOutput: "yes" }) });
+    expect(loadPreferences(coerced).autoOpenOutput).toBe(false);
+  });
+
   it("saves preferences and keeps history to the newest fifty entries", () => {
     const storage = memoryStorage();
     const preferences: ProcessingPreferences = {
@@ -179,7 +194,8 @@ describe("renderer state persistence", () => {
         template: "{name}_{preset}",
         format: "mov"
       },
-      transforms: { volume: 80 }
+      transforms: { volume: 80 },
+      autoOpenOutput: true
     };
     const history: HistoryItem[] = Array.from({ length: 55 }, (_, index) => ({
       id: String(index),
@@ -194,6 +210,55 @@ describe("renderer state persistence", () => {
     expect(JSON.parse(storage.read(preferencesStorageKey)!)).toEqual(preferences);
     expect(loadHistory(storage)).toHaveLength(50);
     expect(JSON.parse(storage.read(historyStorageKey)!)).toHaveLength(50);
+  });
+
+  it("loads and saves sanitized custom presets", () => {
+    const storage = memoryStorage({
+      [customPresetsStorageKey]: JSON.stringify([
+        {
+          id: " custom-one ",
+          name: " Custom One ",
+          settings: {
+            width: 1280,
+            height: 720,
+            fps: 30,
+            videoBitrate: "6M",
+            audioBitrate: "160k",
+            codec: "libx264",
+            maxDurationSeconds: 120,
+            normalizeAudio: true
+          }
+        },
+        {
+          id: "bad",
+          name: "Bad",
+          settings: { width: 0, height: 0, fps: 0, videoBitrate: "wat", audioBitrate: "wat", codec: "bad" }
+        }
+      ])
+    });
+
+    expect(loadCustomPresets(storage)).toEqual([
+      {
+        id: "custom-one",
+        name: "Custom One",
+        custom: true,
+        settings: {
+          width: 1280,
+          height: 720,
+          fps: 30,
+          videoBitrate: "6M",
+          audioBitrate: "160k",
+          codec: "libx264",
+          maxDurationSeconds: 120,
+          normalizeAudio: true,
+          crf: undefined,
+          preset: undefined
+        }
+      }
+    ]);
+
+    saveCustomPresets(loadCustomPresets(storage), storage);
+    expect(JSON.parse(storage.read(customPresetsStorageKey)!)).toHaveLength(1);
   });
 
   it("preserves safe failure metadata and source details in History", () => {
@@ -375,6 +440,44 @@ describe("renderer state persistence", () => {
     expect(formatVideoFormat()).toBe("Unknown format");
   });
 
+  it("summarizes an import batch by total size and validation status", () => {
+    const items: QueueItem[] = [
+      { id: "a", name: "a.mp4", size: 1_000_000, progress: 0, status: "queued", metadataState: "ready" },
+      { id: "b", name: "b.mp4", size: 2_000_000, progress: 0, status: "queued", metadataState: "probing" },
+      { id: "c", name: "c.mp4", size: 3_000_000, progress: 0, status: "queued", metadataState: "unavailable" },
+      { id: "d", name: "d.mp4", size: 4_000_000, progress: 0, status: "queued" }
+    ];
+
+    expect(summarizeImport(items)).toEqual({
+      count: 4,
+      totalBytes: 10_000_000,
+      ready: 1,
+      checking: 2,
+      unreadable: 1
+    });
+
+    expect(summarizeImport([])).toEqual({ count: 0, totalBytes: 0, ready: 0, checking: 0, unreadable: 0 });
+  });
+
+  it("estimates the remaining queue time from overall progress and elapsed time", () => {
+    // 25% done in 60s implies ~180s remaining.
+    expect(estimateQueueEtaSeconds(25, 60_000)).toBe(180);
+    // 50% done in 30s implies ~30s remaining.
+    expect(estimateQueueEtaSeconds(50, 30_000)).toBe(30);
+    // No usable estimate before progress starts, once complete, or without elapsed time.
+    expect(estimateQueueEtaSeconds(0, 60_000)).toBeUndefined();
+    expect(estimateQueueEtaSeconds(100, 60_000)).toBeUndefined();
+    expect(estimateQueueEtaSeconds(40, 0)).toBeUndefined();
+  });
+
+  it("formats the ETA into a customer-readable countdown", () => {
+    expect(formatEta(undefined)).toBe("Estimating time remaining...");
+    expect(formatEta(0)).toBe("Almost done");
+    expect(formatEta(45)).toBe("~45s remaining");
+    expect(formatEta(150)).toBe("~2m 30s remaining");
+    expect(formatEta(3700)).toBe("~1h 01m remaining");
+  });
+
   it("copies saved defaults into independent current-batch settings", () => {
     const preferences: ProcessingPreferences = {
       defaultPresetId: "youtube-short",
@@ -384,7 +487,8 @@ describe("renderer state persistence", () => {
         template: "{preset}_{name}",
         format: "mkv"
       },
-      transforms: {}
+      transforms: {},
+      autoOpenOutput: false
     };
 
     const currentBatch = currentBatchSettingsFromPreferences(preferences, 2);
@@ -431,7 +535,8 @@ describe("renderer state persistence", () => {
         fadeInSeconds: 0,
         fadeOutSeconds: 0,
         volume: 100
-      }
+      },
+      autoOpenOutput: false
     });
 
     restored.transforms.scalePercent = 150;
