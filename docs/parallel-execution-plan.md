@@ -123,7 +123,7 @@ it green. Then push and open a PR per Section 7.
 
 | # | Task | Source req | Status |
 |---|------|-----------|--------|
-| A1 | Drag-and-drop polish across all supported views | 1.2 | [ ] |
+| A1 | Drag-and-drop polish across all supported views | 1.2 | [x] |
 | A2 | Import summary with total size and validation status | 1.2 | [x] |
 | A3 | Output folder picker polish | 1.4 | [x] |
 | A4 | Quality presets (low/medium/high → encoder settings) | 1.4 | [x] |

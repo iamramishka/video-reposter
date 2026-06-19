@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  AlertTriangle,
+  Check,
   Clock,
   Cloud,
   Copy,
+  Edit2,
   Film,
   FolderOpen,
   Home,
@@ -18,20 +21,24 @@ import {
   Plus,
   RotateCcw,
   RotateCw,
+  Save,
   Settings,
   Shield,
   ShieldCheck,
   Square,
   ShoppingCart,
+  Trash2,
+  Upload,
   X
 } from "lucide-react";
 import type { CachedLicense, DeviceInfo, LicenseState, PackageLimits } from "../shared/license";
 import { isLicenseKey, licenseRefreshDescription, licenseStateLabel, normalizeLicenseKey, packageLimitsForLicense } from "../shared/license";
 import { productName, productTagline } from "../shared/branding";
 import { buildOutputOverrides, isSupportedVideoPath, platformPresets, qualityLevels } from "../shared/processing";
-import type { ImportedVideoFile, OutputNamingOptions, OutputOverrides, PlatformPreset, QualityLevel, TransformSettings } from "../shared/processing";
+import type { ImportedVideoFile, OutputNamingOptions, OutputSettings, PlatformPreset, QualityLevel, TransformSettings, VideoCodec } from "../shared/processing";
 import { invalidVideoFailure, processingFailedFailure } from "../shared/processingFailure";
 import type { ProcessingAvailability, ProcessingFailure } from "../shared/processingFailure";
+import { buildProcessingTelemetryPayload } from "../shared/telemetry";
 import { createVideoReposterBridge, getBridgeMode, usesNativeFileDialogs } from "./bridge";
 import {
   buildQueueItems,
@@ -57,11 +64,13 @@ import {
   getWorkerPoolState,
   importSourceLabel,
   isNewBatchLocked,
+  loadCustomPresets,
   loadHistory,
   loadPreferences,
   loadQueue,
   queueStatusLabel,
   restoredDefaultPreferences,
+  saveCustomPresets,
   saveHistory,
   savePreferences,
   saveQueue,
@@ -133,12 +142,14 @@ function ActivationScreen({
 }) {
   const [key, setKey] = useState("");
   const [error, setError] = useState("");
+  const [errorCode, setErrorCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [showBuyPopup, setShowBuyPopup] = useState(false);
   const normalized = useMemo(() => normalizeLicenseKey(key), [key]);
 
   async function activate() {
     setError("");
+    setErrorCode("");
     if (!isLicenseKey(normalized)) {
       setError("Use format VDRP-XXXX-XXXX-XXXX-XXXX.");
       return;
@@ -150,6 +161,7 @@ function ActivationScreen({
       onActivated(result.license as CachedLicense);
       return;
     }
+    setErrorCode(result.code ?? "");
     setError(result.message ?? "Activation failed. Please try again.");
   }
 
@@ -209,6 +221,13 @@ function ActivationScreen({
         </div>
 
         {(error || blockedMessage) && <div className="error">{error || blockedMessage}</div>}
+        {(errorCode === "LIC_003" || blockedState === "DEVICE_MISMATCH") && (
+          <DeviceConflictHelp
+            device={device}
+            licenseKey={normalized}
+            onContact={() => videoReposterBridge.openExternal("https://wa.me/94784324261")}
+          />
+        )}
 
         <button className="primary-action" onClick={activate} disabled={busy}>
           <ShieldCheck size={22} />
@@ -286,7 +305,8 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   const [now, setNow] = useState(() => Date.now());
   const [logs, setLogs] = useState<string[]>(["Ready for video import."]);
   const [importStatus, setImportStatus] = useState("");
-  const [presets, setPresets] = useState<PlatformPreset[]>(platformPresets);
+  const [basePresets, setBasePresets] = useState<PlatformPreset[]>(platformPresets);
+  const [customPresets, setCustomPresets] = useState<PlatformPreset[]>(loadCustomPresets);
   const [history, setHistory] = useState<HistoryItem[]>(loadHistory);
   const [queueClearConfirmation, setQueueClearConfirmation] = useState<"finished" | "all" | null>(null);
   const [processingAvailability, setProcessingAvailability] = useState<ProcessingAvailability | null>(null);
@@ -299,10 +319,14 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   const videoPickerRef = useRef<HTMLInputElement | null>(null);
   const folderPickerRef = useRef<HTMLInputElement | null>(null);
   const historyIds = useRef(new Set(history.map((item) => item.id)));
+  const telemetryIds = useRef(new Set<string>());
   const autoOpenOutputRef = useRef(preferences.autoOpenOutput);
+  const dragCounterRef = useRef(0);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const totals = useMemo(() => getQueueTotals(items), [items]);
   const etaSeconds = running && batchStartedAt !== null ? estimateQueueEtaSeconds(totals.overall, now - batchStartedAt) : undefined;
   const packageLimits = useMemo(() => packageLimitsForLicense(license), [license]);
+  const presets = useMemo(() => [...basePresets, ...customPresets], [basePresets, customPresets]);
   const visiblePresets = useMemo(() => presets.slice(0, packageLimits.template_limit), [packageLimits.template_limit, presets]);
   const defaultPresetId = preferences.defaultPresetId;
   const transforms = preferences.transforms;
@@ -317,7 +341,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
 
   useEffect(() => {
     videoReposterBridge.getProcessingPresets().then((nextPresets) => {
-      if (nextPresets.length) setPresets(nextPresets);
+      if (nextPresets.length) setBasePresets(nextPresets);
     });
     videoReposterBridge.checkFfmpeg().then((result) => {
       setProcessingAvailability(result);
@@ -337,6 +361,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
                     ? toQueueFailure(update.failure ?? processingFailedFailure(update.message ?? "Processing failed without details."))
                     : undefined;
                   recordHistoryItem(item, update.status, failure?.message ?? update.message, failure);
+                  void reportProcessingTelemetry(item, update, failure);
                 }
                 return {
                 ...item,
@@ -368,6 +393,10 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   useEffect(() => {
     saveHistory(history);
   }, [history]);
+
+  useEffect(() => {
+    saveCustomPresets(customPresets);
+  }, [customPresets]);
 
   useEffect(() => {
     savePreferences(preferences);
@@ -552,6 +581,11 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     }
   }
 
+  function clearCurrentBatchOutputFolder() {
+    setCurrentBatchOutputDir("");
+    appendLog(setLogs, "Current batch output folder reset to the source folder.");
+  }
+
   async function chooseDefaultOutputFolder() {
     appendLog(setLogs, "Opening default output folder picker...");
     try {
@@ -567,6 +601,11 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     }
   }
 
+  function clearDefaultOutputFolder() {
+    setPreferences((current) => ({ ...current, outputDir: "" }));
+    appendLog(setLogs, "Default output folder reset to the source folder.");
+  }
+
   function updateTransforms(next: React.SetStateAction<TransformSettings>) {
     setPreferences((current) => ({
       ...current,
@@ -577,6 +616,24 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   function updateDefaultPreset(id: string) {
     setPreferences((current) => ({ ...current, defaultPresetId: id }));
     appendLog(setLogs, `Default preset changed to ${presets.find((preset) => preset.id === id)?.name ?? id}.`);
+  }
+
+  function saveCustomPreset(preset: PlatformPreset) {
+    setCustomPresets((current) => {
+      const nextPreset = { ...preset, custom: true };
+      const exists = current.some((item) => item.id === nextPreset.id);
+      return exists ? current.map((item) => item.id === nextPreset.id ? nextPreset : item) : [...current, nextPreset];
+    });
+    appendLog(setLogs, `Saved custom preset ${preset.name}.`);
+  }
+
+  function deleteCustomPreset(id: string) {
+    const fallbackPresetId = basePresets[0]?.id ?? defaultPreferences.defaultPresetId;
+    const deleted = customPresets.find((preset) => preset.id === id);
+    setCustomPresets((current) => current.filter((preset) => preset.id !== id));
+    setPreferences((current) => current.defaultPresetId === id ? { ...current, defaultPresetId: fallbackPresetId } : current);
+    setCurrentBatchPresetId((current) => current === id ? fallbackPresetId : current);
+    appendLog(setLogs, `Deleted custom preset ${deleted?.name ?? id}.`);
   }
 
   function updateDefaultMaxWorkers(value: number) {
@@ -629,6 +686,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   async function launchQueueItem(item: QueueItem) {
     const attemptedItem = {
       ...item,
+      presetId: currentBatchPresetId,
       presetName: visiblePresets.find((preset) => preset.id === currentBatchPresetId)?.name ?? currentBatchPresetId,
       transformSummary: summarizeTransforms(transforms)
     };
@@ -669,6 +727,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
               status: "processing",
               processingJobId: started.id,
               outputPath: started.outputPath,
+              presetId: currentBatchPresetId,
               presetName: started.preset.name,
               transformSummary: summarizeTransforms(transforms),
               durationSeconds: started.probe.durationSeconds,
@@ -682,6 +741,26 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
       setLogs,
       `Started ${started.preset.name} job for ${item.name}${started.probe.durationSeconds ? ` (${Math.round(started.probe.durationSeconds)}s)` : ""}. Output: ${started.outputPath}`
     );
+  }
+
+  async function reportProcessingTelemetry(item: QueueItem, update: { id: string; status: string; elapsedMs?: number; throughputMbPerMin?: number }, failure?: QueueFailure) {
+    if (!license?.license_key || telemetryIds.current.has(update.id)) return;
+    const payload = buildProcessingTelemetryPayload({
+      jobId: update.id,
+      status: update.status,
+      preset: item.presetId ?? currentBatchPresetId,
+      elapsedMs: update.elapsedMs,
+      throughputMbPerMin: update.throughputMbPerMin,
+      inputSizeBytes: item.size,
+      errorCode: failure?.code
+    });
+    if (!payload) return;
+    telemetryIds.current.add(update.id);
+    try {
+      await videoReposterBridge.sendProcessingTelemetry(license.license_key, payload);
+    } catch {
+      // Telemetry is best-effort and must never affect local processing.
+    }
   }
 
   function pauseBatch() {
@@ -909,11 +988,11 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
                 <button
                   type="button"
                   className="icon-button"
-                  aria-label="Clear output folder — reset to same folder as source"
+                  aria-label="Clear output folder and reset to same folder as source"
                   title="Reset to same folder as source"
-                  onClick={() => { setCurrentBatchOutputDir(""); appendLog(setLogs, "Output folder cleared — files will be saved next to the source video."); }}
+                  onClick={clearCurrentBatchOutputFolder}
                 >
-                  ×
+                  <X size={15} />
                 </button>
               )}
             </div>
@@ -1186,6 +1265,8 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
           packageName={packageLabel(license)}
           defaultPresetId={defaultPresetId}
           onSetDefault={updateDefaultPreset}
+          onSaveCustomPreset={saveCustomPreset}
+          onDeleteCustomPreset={deleteCustomPreset}
         />
       ) : null;
     }
@@ -1206,6 +1287,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
         packageLimits={packageLimits}
         processingAvailability={processingAvailability}
         onChooseDefaultOutputFolder={chooseDefaultOutputFolder}
+        onClearDefaultOutputFolder={clearDefaultOutputFolder}
         onDefaultOutputNamingChange={updateDefaultOutputNaming}
         onDefaultMaxWorkersChange={updateDefaultMaxWorkers}
         onAutoOpenOutputChange={updateAutoOpenOutput}
@@ -1215,19 +1297,41 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     );
   }
 
+  const canDrop = !isNewBatchLocked(items, running);
+
   return (
     <main
-      className="dashboard-shell"
+      className={`dashboard-shell${isDraggingOver && canDrop ? " drag-active" : ""}`}
+      onDragEnter={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        dragCounterRef.current += 1;
+        if (dragCounterRef.current === 1) setIsDraggingOver(true);
+      }}
       onDragOver={(event) => {
         event.preventDefault();
-        event.dataTransfer.dropEffect = activeView === "new-batch" && !isNewBatchLocked(items, running) ? "copy" : "none";
+        event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
+      }}
+      onDragLeave={() => {
+        dragCounterRef.current -= 1;
+        if (dragCounterRef.current === 0) setIsDraggingOver(false);
       }}
       onDrop={(event) => {
         event.preventDefault();
-        if (activeView !== "new-batch" || isNewBatchLocked(items, running)) return;
+        dragCounterRef.current = 0;
+        setIsDraggingOver(false);
+        if (!canDrop) return;
+        setActiveView("new-batch");
         importFiles(event.dataTransfer.files, "drop");
       }}
     >
+      {isDraggingOver && canDrop && (
+        <div className="drag-overlay" aria-hidden="true">
+          <div className="drag-overlay-inner">
+            <Upload size={40} />
+            <p>Drop videos here</p>
+          </div>
+        </div>
+      )}
       <aside className="dashboard-sidebar">
         <div className="app-title"><Film /> {productName}</div>
         {navItems.map((item) => (
@@ -1555,56 +1659,274 @@ function PresetGallery({
   presetLimit,
   packageName,
   defaultPresetId,
-  onSetDefault
+  onSetDefault,
+  onSaveCustomPreset,
+  onDeleteCustomPreset
 }: {
   presets: PlatformPreset[];
   presetLimit: number;
   packageName: string;
   defaultPresetId: string;
   onSetDefault: (id: string) => void;
+  onSaveCustomPreset: (preset: PlatformPreset) => void;
+  onDeleteCustomPreset: (id: string) => void;
 }) {
   const presetAccess = getPresetAccess(presets, presetLimit);
   const includedCount = presetAccess.filter((item) => item.included).length;
+  const [editingPreset, setEditingPreset] = useState<PlatformPreset | null>(null);
   return (
-    <section className="panel preset-gallery">
-      <div className="panel-title">
-        <div>
-          <h2>Platform Presets</h2>
-          <p>Your default preset is applied when preparing a new batch.</p>
+    <>
+      <section className="panel preset-gallery">
+        <div className="panel-title">
+          <div>
+            <h2>Platform Presets</h2>
+            <p>Your default preset is applied when preparing a new batch.</p>
+          </div>
+          <div className="preset-title-actions">
+            <span className="preset-access-summary">{includedCount} of {presets.length} included in {packageName}</span>
+            <button onClick={() => setEditingPreset(createCustomPresetDraft(presets[0]))}><Plus size={15} /> Custom Preset</button>
+          </div>
         </div>
-        <span className="preset-access-summary">{includedCount} of {presets.length} included in {packageName}</span>
-      </div>
-      <div className="preset-grid">
-        {presetAccess.map(({ preset, included }) => {
-          const isDefault = preset.id === defaultPresetId;
-          return (
-            <article className={`preset-card${isDefault ? " selected" : ""}${included ? "" : " restricted"}`} key={preset.id}>
-              <div className="preset-card-title">
-                <strong>{preset.name}</strong>
-                <div className="preset-card-badges">
-                  {isDefault && <span className="preset-badge">Default</span>}
-                  <span className={included ? "preset-badge included" : "preset-badge restricted"}>{included ? "Included" : "Not included"}</span>
+        <div className="preset-grid">
+          {presetAccess.map(({ preset, included }) => {
+            const isDefault = preset.id === defaultPresetId;
+            return (
+              <article className={`preset-card${isDefault ? " selected" : ""}${included ? "" : " restricted"}`} key={preset.id}>
+                <div className="preset-card-title">
+                  <strong>{preset.name}</strong>
+                  <div className="preset-card-badges">
+                    {isDefault && <span className="preset-badge">Default</span>}
+                    {preset.custom && <span className="preset-badge custom">Custom</span>}
+                    <span className={included ? "preset-badge included" : "preset-badge restricted"}>{included ? "Included" : "Not included"}</span>
+                  </div>
                 </div>
-              </div>
-              <dl className="preset-details">
-                <div><dt>Resolution</dt><dd>{preset.settings.width}x{preset.settings.height}</dd></div>
-                <div><dt>Frame rate</dt><dd>{preset.settings.fps} fps</dd></div>
-                <div><dt>Video</dt><dd>{preset.settings.codec} · {preset.settings.videoBitrate}</dd></div>
-                <div><dt>Audio</dt><dd>{preset.settings.audioBitrate}</dd></div>
-                <div><dt>Max length</dt><dd>{preset.settings.maxDurationSeconds ? `${preset.settings.maxDurationSeconds} seconds` : "No preset limit"}</dd></div>
-              </dl>
-              {!included && (
-                <p className="preset-restriction"><Lock size={15} /> Your {packageName} package includes {includedCount} preset{includedCount === 1 ? "" : "s"}.</p>
-              )}
-              <button onClick={() => onSetDefault(preset.id)} disabled={isDefault || !included}>
-                {isDefault ? "Current Default" : included ? "Set as Default" : "Not Included in Package"}
-              </button>
-            </article>
-          );
-        })}
+                <dl className="preset-details">
+                  <div><dt>Resolution</dt><dd>{preset.settings.width}x{preset.settings.height}</dd></div>
+                  <div><dt>Frame rate</dt><dd>{preset.settings.fps} fps</dd></div>
+                  <div><dt>Video</dt><dd>{preset.settings.codec} / {preset.settings.videoBitrate}</dd></div>
+                  <div><dt>Audio</dt><dd>{preset.settings.audioBitrate}{preset.settings.normalizeAudio ? " / normalized" : ""}</dd></div>
+                  <div><dt>Max length</dt><dd>{preset.settings.maxDurationSeconds ? `${preset.settings.maxDurationSeconds} seconds` : "No preset limit"}</dd></div>
+                </dl>
+                {!included && (
+                  <p className="preset-restriction"><Lock size={15} /> Your {packageName} package includes {includedCount} preset{includedCount === 1 ? "" : "s"}.</p>
+                )}
+                <div className="preset-card-actions">
+                  <button onClick={() => onSetDefault(preset.id)} disabled={isDefault || !included}>
+                    {isDefault ? <Check size={15} /> : null}
+                    {isDefault ? "Current Default" : included ? "Set as Default" : "Not Included in Package"}
+                  </button>
+                  <button onClick={() => setEditingPreset(preset.custom ? preset : createCustomPresetDraft(preset))}>
+                    <Edit2 size={15} /> {preset.custom ? "Edit" : "Clone"}
+                  </button>
+                  {preset.custom && (
+                    <button className="danger" onClick={() => onDeleteCustomPreset(preset.id)} disabled={isDefault}>
+                      <Trash2 size={15} /> Delete
+                    </button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+      {editingPreset && (
+        <PresetEditorDialog
+          preset={editingPreset}
+          onCancel={() => setEditingPreset(null)}
+          onSave={(preset) => {
+            onSaveCustomPreset(preset);
+            setEditingPreset(null);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function DeviceConflictHelp({ device, licenseKey, onContact }: { device: DeviceInfo; licenseKey: string; onContact: () => void }) {
+  return (
+    <section className="device-conflict-panel" aria-label="Device conflict recovery">
+      <div>
+        <AlertTriangle size={20} />
+        <strong>License already active on another device</strong>
+      </div>
+      <p>Ask support to reset the device binding, then activate again on this computer.</p>
+      <dl>
+        <div><dt>This device</dt><dd>{device.deviceName}</dd></div>
+        <div><dt>Device ID</dt><dd>{device.deviceId.slice(0, 24).toUpperCase()}</dd></div>
+        <div><dt>License</dt><dd>{isLicenseKey(licenseKey) ? licenseKey : "Enter the license key before contacting support"}</dd></div>
+      </dl>
+      <div className="device-conflict-actions">
+        <button onClick={() => void copyText(`${device.deviceName} ${device.deviceId}`)}><Copy size={16} /> Copy Device Info</button>
+        <button onClick={onContact}><ShoppingCart size={16} /> Contact Support</button>
       </div>
     </section>
   );
+}
+
+type PresetDraft = {
+  id: string;
+  name: string;
+  width: string;
+  height: string;
+  fps: string;
+  videoBitrate: string;
+  audioBitrate: string;
+  codec: VideoCodec;
+  maxDurationSeconds: string;
+  normalizeAudio: boolean;
+};
+
+function PresetEditorDialog({ preset, onCancel, onSave }: { preset: PlatformPreset; onCancel: () => void; onSave: (preset: PlatformPreset) => void }) {
+  const [draft, setDraft] = useState<PresetDraft>(() => presetToDraft(preset));
+  const settings = draftToPresetSettings(draft);
+  const canSave = Boolean(draft.name.trim() && settings);
+
+  function setValue<K extends keyof PresetDraft>(key: K, value: PresetDraft[K]) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onCancel}>
+      <section
+        aria-labelledby="preset-editor-title"
+        aria-modal="true"
+        className="preset-editor-modal"
+        role="dialog"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-title">
+          <div>
+            <h3 id="preset-editor-title">Custom Preset</h3>
+            <p>Save encoder settings for repeat batches.</p>
+          </div>
+          <button className="modal-close inline" aria-label="Close custom preset editor" title="Close" onClick={onCancel}><X size={18} /></button>
+        </div>
+        <div className="preset-editor-grid">
+          <label>
+            <span>Name</span>
+            <input value={draft.name} maxLength={60} onChange={(event) => setValue("name", event.target.value)} />
+          </label>
+          <label>
+            <span>Width</span>
+            <input type="number" min={16} max={7680} step={2} value={draft.width} onChange={(event) => setValue("width", event.target.value)} />
+          </label>
+          <label>
+            <span>Height</span>
+            <input type="number" min={16} max={7680} step={2} value={draft.height} onChange={(event) => setValue("height", event.target.value)} />
+          </label>
+          <label>
+            <span>FPS</span>
+            <input type="number" min={1} max={120} value={draft.fps} onChange={(event) => setValue("fps", event.target.value)} />
+          </label>
+          <label>
+            <span>Video Bitrate</span>
+            <input value={draft.videoBitrate} placeholder="4M" onChange={(event) => setValue("videoBitrate", event.target.value)} />
+          </label>
+          <label>
+            <span>Audio Bitrate</span>
+            <input value={draft.audioBitrate} placeholder="128k" onChange={(event) => setValue("audioBitrate", event.target.value)} />
+          </label>
+          <label>
+            <span>Codec</span>
+            <select value={draft.codec} onChange={(event) => setValue("codec", event.target.value as VideoCodec)}>
+              <option value="libx264">H.264 CPU</option>
+              <option value="libx265">H.265 CPU</option>
+              <option value="h264_nvenc">NVIDIA NVENC</option>
+              <option value="h264_amf">AMD AMF</option>
+              <option value="h264_qsv">Intel Quick Sync</option>
+            </select>
+          </label>
+          <label>
+            <span>Max Seconds</span>
+            <input type="number" min={1} max={14400} placeholder="Optional" value={draft.maxDurationSeconds} onChange={(event) => setValue("maxDurationSeconds", event.target.value)} />
+          </label>
+          <label className="settings-toggle preset-editor-toggle">
+            <input type="checkbox" checked={draft.normalizeAudio} onChange={(event) => setValue("normalizeAudio", event.target.checked)} />
+            <span>Normalize audio</span>
+          </label>
+        </div>
+        {!settings && <p className="preset-editor-error"><AlertTriangle size={15} /> Use valid dimensions, FPS, and bitrate values like 4M or 128k.</p>}
+        <div className="confirmation-actions">
+          <button onClick={onCancel}>Cancel</button>
+          <button
+            className="confirm"
+            disabled={!canSave}
+            onClick={() => {
+              if (!settings) return;
+              onSave({ id: draft.id, name: draft.name.trim(), settings, custom: true });
+            }}
+          >
+            <Save size={15} /> Save Preset
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function createCustomPresetDraft(base?: PlatformPreset): PlatformPreset {
+  const settings = base?.settings ?? platformPresets.find((preset) => preset.id === "instagram-reel")?.settings ?? {
+    width: 1080,
+    height: 1920,
+    fps: 30,
+    videoBitrate: "4M",
+    audioBitrate: "128k",
+    codec: "libx264"
+  };
+  const name = base ? `${base.name} Custom` : "Custom Preset";
+  return {
+    id: `custom-${Date.now().toString(36)}`,
+    name,
+    settings: { ...settings },
+    custom: true
+  };
+}
+
+function presetToDraft(preset: PlatformPreset): PresetDraft {
+  return {
+    id: preset.id,
+    name: preset.name,
+    width: String(preset.settings.width),
+    height: String(preset.settings.height),
+    fps: String(preset.settings.fps),
+    videoBitrate: preset.settings.videoBitrate,
+    audioBitrate: preset.settings.audioBitrate,
+    codec: preset.settings.codec,
+    maxDurationSeconds: preset.settings.maxDurationSeconds ? String(preset.settings.maxDurationSeconds) : "",
+    normalizeAudio: Boolean(preset.settings.normalizeAudio)
+  };
+}
+
+function draftToPresetSettings(draft: PresetDraft): OutputSettings | null {
+  const width = parsePresetInteger(draft.width, 16, 7680);
+  const height = parsePresetInteger(draft.height, 16, 7680);
+  const fps = parsePresetInteger(draft.fps, 1, 120);
+  const maxDurationSeconds = draft.maxDurationSeconds.trim() ? parsePresetInteger(draft.maxDurationSeconds, 1, 14400) : undefined;
+  if (!width || !height || !fps || maxDurationSeconds === null) return null;
+  if (!isBitrateValue(draft.videoBitrate) || !isBitrateValue(draft.audioBitrate)) return null;
+  return {
+    width: width % 2 === 0 ? width : width + 1,
+    height: height % 2 === 0 ? height : height + 1,
+    fps,
+    videoBitrate: draft.videoBitrate.trim(),
+    audioBitrate: draft.audioBitrate.trim(),
+    codec: draft.codec,
+    maxDurationSeconds,
+    normalizeAudio: draft.normalizeAudio || undefined
+  };
+}
+
+function parsePresetInteger(value: string, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const rounded = Math.round(parsed);
+  if (rounded < min || rounded > max) return null;
+  return rounded;
+}
+
+function isBitrateValue(value: string) {
+  return /^[1-9]\d*(?:\.\d+)?[kKmM]$/.test(value.trim());
 }
 
 function SettingsPanel({
@@ -1619,6 +1941,7 @@ function SettingsPanel({
   packageLimits,
   processingAvailability,
   onChooseDefaultOutputFolder,
+  onClearDefaultOutputFolder,
   onDefaultOutputNamingChange,
   onDefaultMaxWorkersChange,
   onAutoOpenOutputChange,
@@ -1636,6 +1959,7 @@ function SettingsPanel({
   packageLimits: PackageLimits;
   processingAvailability: ProcessingAvailability | null;
   onChooseDefaultOutputFolder: () => void;
+  onClearDefaultOutputFolder: () => void;
   onDefaultOutputNamingChange: (value: Partial<OutputNamingOptions>) => void;
   onDefaultMaxWorkersChange: (value: number) => void;
   onAutoOpenOutputChange: (value: boolean) => void;
@@ -1688,6 +2012,7 @@ function SettingsPanel({
         <div className="settings-default-folder">
           <InfoLine icon={<FolderOpen />} label="Default Output" value={defaultOutputDir || "Same folder as source"} />
           <button title="Choose the output folder used by new batches" onClick={onChooseDefaultOutputFolder}>Choose Default Folder</button>
+          <button title="Reset the default output folder to the source folder" onClick={onClearDefaultOutputFolder} disabled={!defaultOutputDir}>Use Source Folder</button>
         </div>
         <label className="settings-control">
           <span>Default Workers</span>
