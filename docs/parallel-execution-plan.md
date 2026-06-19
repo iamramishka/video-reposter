@@ -126,7 +126,7 @@ it green. Then push and open a PR per Section 7.
 | A1 | Drag-and-drop polish across all supported views | 1.2 | [ ] |
 | A2 | Import summary with total size and validation status | 1.2 | [x] |
 | A3 | Output folder picker polish | 1.4 | [ ] |
-| A4 | Quality presets (low/medium/high → encoder settings) | 1.4 | [ ] |
+| A4 | Quality presets (low/medium/high → encoder settings) | 1.4 | [x] |
 | A5 | Custom resolution UI | 1.4 | [ ] |
 | A6 | Overall ETA across the processing queue | 1.5 | [x] |
 | A7 | Auto-open output folder option | 1.5 | [x] |

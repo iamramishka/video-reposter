@@ -98,6 +98,46 @@ export const platformPresets: PlatformPreset[] = [
   }
 ];
 
+export type QualityLevel = "preset" | "low" | "medium" | "high";
+
+export type OutputOverrides = {
+  quality?: QualityLevel;
+  width?: number;
+  height?: number;
+};
+
+export const qualityLevels: QualityLevel[] = ["preset", "low", "medium", "high"];
+
+const qualityProfiles: Record<Exclude<QualityLevel, "preset">, { crf: number; preset: string }> = {
+  low: { crf: 30, preset: "veryfast" },
+  medium: { crf: 23, preset: "fast" },
+  high: { crf: 18, preset: "slow" }
+};
+
+// FFmpeg with yuv420p requires even pixel dimensions; clamp to a sane 16..7680 range.
+export function normalizeDimension(value?: number): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const rounded = Math.round(value);
+  if (rounded < 16 || rounded > 7680) return undefined;
+  return rounded % 2 === 0 ? rounded : rounded + 1;
+}
+
+export function applyOutputOverrides(settings: OutputSettings, overrides?: OutputOverrides): OutputSettings {
+  if (!overrides) return settings;
+  let next: OutputSettings = { ...settings };
+
+  if (overrides.quality && overrides.quality !== "preset") {
+    const profile = qualityProfiles[overrides.quality];
+    next = { ...next, crf: profile.crf, preset: profile.preset };
+  }
+
+  const width = normalizeDimension(overrides.width);
+  const height = normalizeDimension(overrides.height);
+  if (width && height) next = { ...next, width, height };
+
+  return next;
+}
+
 export function buildFfmpegArgs(job: FfmpegJob) {
   const output = normalizeOutputSettings(job.output);
   const transforms = job.transforms ?? {};

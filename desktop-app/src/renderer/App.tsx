@@ -28,8 +28,8 @@ import {
 import type { CachedLicense, DeviceInfo, LicenseState, PackageLimits } from "../shared/license";
 import { isLicenseKey, licenseRefreshDescription, licenseStateLabel, normalizeLicenseKey, packageLimitsForLicense } from "../shared/license";
 import { productName, productTagline } from "../shared/branding";
-import { isSupportedVideoPath, platformPresets } from "../shared/processing";
-import type { ImportedVideoFile, OutputNamingOptions, PlatformPreset, TransformSettings } from "../shared/processing";
+import { isSupportedVideoPath, platformPresets, qualityLevels } from "../shared/processing";
+import type { ImportedVideoFile, OutputNamingOptions, OutputOverrides, PlatformPreset, QualityLevel, TransformSettings } from "../shared/processing";
 import { invalidVideoFailure, processingFailedFailure } from "../shared/processingFailure";
 import type { ProcessingAvailability, ProcessingFailure } from "../shared/processingFailure";
 import { createVideoReposterBridge, getBridgeMode, usesNativeFileDialogs } from "./bridge";
@@ -294,6 +294,8 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   const [currentBatchOutputDir, setCurrentBatchOutputDir] = useState(() => currentBatchSettingsFromPreferences(loadPreferences()).outputDir);
   const [currentBatchMaxWorkers, setCurrentBatchMaxWorkers] = useState(() => currentBatchSettingsFromPreferences(loadPreferences()).maxWorkers);
   const [currentBatchOutputNaming, setCurrentBatchOutputNaming] = useState(() => currentBatchSettingsFromPreferences(loadPreferences()).outputNaming);
+  const [currentBatchQuality, setCurrentBatchQuality] = useState<QualityLevel>("preset");
+  const [customResolution, setCustomResolution] = useState<{ width: string; height: string }>({ width: "", height: "" });
   const videoPickerRef = useRef<HTMLInputElement | null>(null);
   const folderPickerRef = useRef<HTMLInputElement | null>(null);
   const historyIds = useRef(new Set(history.map((item) => item.id)));
@@ -640,9 +642,14 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     }
 
     setItems((current) => current.map((next) => (next.id === item.id ? { ...next, status: "starting", progress: 0, failure: undefined } : next)));
+    const outputOverrides: OutputOverrides = {
+      quality: currentBatchQuality,
+      width: Number(customResolution.width) || undefined,
+      height: Number(customResolution.height) || undefined
+    };
     let started: Awaited<ReturnType<typeof videoReposterBridge.startProcessingFile>>;
     try {
-      started = await videoReposterBridge.startProcessingFile(item.path, currentBatchPresetId, currentBatchOutputDir || undefined, cleanTransforms(transforms), currentBatchOutputNaming);
+      started = await videoReposterBridge.startProcessingFile(item.path, currentBatchPresetId, currentBatchOutputDir || undefined, cleanTransforms(transforms), currentBatchOutputNaming, outputOverrides);
     } catch (error) {
       const failure = processingFailedFailure(error instanceof Error ? error.message : "Processing request failed.");
       const queueFailure = toQueueFailure(failure);
@@ -917,6 +924,16 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
               <option value="mp4">MP4</option>
               <option value="mkv">MKV</option>
               <option value="mov">MOV</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="new-batch-quality">Quality</label>
+            <select
+              id="new-batch-quality"
+              value={currentBatchQuality}
+              onChange={(event) => setCurrentBatchQuality(event.target.value as QualityLevel)}
+            >
+              {qualityLevels.map((level) => <option key={level} value={level}>{qualityLabel(level)}</option>)}
             </select>
           </div>
           <div>
@@ -1706,6 +1723,13 @@ function SettingsPanel({
 function packageLabel(license: CachedLicense | null) {
   const plan = license?.plan ?? "pro";
   return plan.charAt(0).toUpperCase() + plan.slice(1);
+}
+
+function qualityLabel(level: QualityLevel) {
+  if (level === "preset") return "Preset default";
+  if (level === "low") return "Low (smaller file)";
+  if (level === "medium") return "Medium";
+  return "High (best quality)";
 }
 
 async function copyText(value: string) {

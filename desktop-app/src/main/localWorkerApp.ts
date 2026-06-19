@@ -6,10 +6,10 @@ import { appendProcessingLog, getProcessingLogPath } from "./processingLog.js";
 import { ProcessingService } from "./processingService.js";
 import { getStableDeviceId, readLicenseCache, writeLicenseCache } from "./licenseCache.js";
 import { isLicenseKey, normalizeLicenseKey, stateFromCache } from "../shared/license.js";
-import { buildFfmpegCommand, isSupportedVideoPath, platformPresets, renderOutputFileName } from "../shared/processing.js";
+import { applyOutputOverrides, buildFfmpegCommand, isSupportedVideoPath, platformPresets, renderOutputFileName } from "../shared/processing.js";
 import { invalidVideoFailure, outputFolderFailure } from "../shared/processingFailure.js";
 import type { DeviceInfo } from "../shared/license.js";
-import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, TransformSettings } from "../shared/processing.js";
+import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, OutputOverrides, TransformSettings } from "../shared/processing.js";
 import type { ProcessingJobRequest, ProcessingUpdate } from "./processingService.js";
 
 export type NativeDialogs = {
@@ -169,7 +169,7 @@ export function createLocalWorkerApp(options: LocalWorkerAppOptions) {
 
   api.post("/api/local/processing/start-file", async (req, res, next) => {
     try {
-      const body = req.body as { inputPath?: unknown; presetId?: unknown; outputDir?: unknown; transforms?: TransformSettings; outputNaming?: OutputNamingOptions };
+      const body = req.body as { inputPath?: unknown; presetId?: unknown; outputDir?: unknown; transforms?: TransformSettings; outputNaming?: OutputNamingOptions; outputOverrides?: OutputOverrides };
       const inputPath = String(body.inputPath ?? "");
       const presetId = String(body.presetId ?? "instagram-reel");
       const preset = platformPresets.find((item) => item.id === presetId) ?? platformPresets.find((item) => item.id === "instagram-reel");
@@ -195,7 +195,7 @@ export function createLocalWorkerApp(options: LocalWorkerAppOptions) {
           ...processingService.startJob({
             inputPath,
             outputPath,
-            output: preset.settings,
+            output: applyOutputOverrides(preset.settings, body.outputOverrides),
             transforms: body.transforms,
             durationSeconds: probe.durationSeconds
           }),

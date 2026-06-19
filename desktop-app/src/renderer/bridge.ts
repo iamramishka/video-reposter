@@ -1,6 +1,6 @@
 import { platformPresets } from "../shared/processing";
 import type { CachedLicense, DeviceInfo, LicenseState } from "../shared/license";
-import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, PlatformPreset, TransformSettings } from "../shared/processing";
+import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, OutputOverrides, PlatformPreset, TransformSettings } from "../shared/processing";
 import type { ProbeResult, ProcessingJobRequest, ProcessingUpdate } from "../main/processingService";
 import { componentUnavailableFailure, invalidVideoFailure } from "../shared/processingFailure";
 import type { ProcessingAvailability, ProcessingFailureResult } from "../shared/processingFailure";
@@ -25,7 +25,8 @@ export type VideoReposterBridge = {
     presetId: string,
     outputDir?: string,
     transforms?: TransformSettings,
-    outputNaming?: OutputNamingOptions
+    outputNaming?: OutputNamingOptions,
+    outputOverrides?: OutputOverrides
   ): Promise<{ ok: true; id: string; args: string[]; outputPath: string; probe: ProbeResult; preset: PlatformPreset } | ProcessingFailureResult>;
   stopProcessingJob(id: string): Promise<boolean>;
   selectVideoFiles(): Promise<ImportedVideoFile[]>;
@@ -80,8 +81,8 @@ function createLocalWorkerBridge(): VideoReposterBridge {
     probeVideoFile: (inputPath) => requestJson<ProbeResult>("/processing/probe-file", { inputPath }),
     buildProcessingCommand: (job) => requestJson<string>("/processing/build-command", { job }),
     startProcessingJob: (job) => requestJson<{ id: string; args: string[] }>("/processing/start-job", { job }),
-    startProcessingFile: (inputPath, presetId = "instagram-reel", outputDir, transforms, outputNaming) =>
-      requestJson("/processing/start-file", { inputPath, presetId, outputDir, transforms, outputNaming }),
+    startProcessingFile: (inputPath, presetId = "instagram-reel", outputDir, transforms, outputNaming, outputOverrides) =>
+      requestJson("/processing/start-file", { inputPath, presetId, outputDir, transforms, outputNaming, outputOverrides }),
     stopProcessingJob: (id) => requestJson<boolean>("/processing/stop-job", { id }),
     selectVideoFiles: () => requestJson<ImportedVideoFile[]>("/files/select-videos"),
     selectVideoFolder: () => requestJson<ImportedVideoFile[]>("/files/select-video-folder"),
