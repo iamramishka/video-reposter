@@ -1,5 +1,5 @@
 import { defaultOutputNamingTemplate, normalizeOutputNamingOptions, platformPresets, supportedOutputFormats } from "../shared/processing";
-import type { ImportedVideoFile, OutputFormat, OutputNamingOptions, PlatformPreset, TransformSettings } from "../shared/processing";
+import type { ImportedVideoFile, OutputFormat, OutputNamingOptions, OutputSettings, PlatformPreset, TransformSettings, VideoCodec } from "../shared/processing";
 import { processingFailureMessages } from "../shared/processingFailure";
 import type { ProcessingFailure } from "../shared/processingFailure";
 
@@ -16,6 +16,7 @@ export type QueueItem = {
   path?: string;
   outputPath?: string;
   processingJobId?: string;
+  presetId?: string;
   presetName?: string;
   transformSummary?: string;
   durationSeconds?: number;
@@ -115,6 +116,7 @@ export const defaultPreferences: ProcessingPreferences = {
 export const historyStorageKey = "video-reposter.processing-history";
 export const preferencesStorageKey = "video-reposter.processing-preferences";
 export const queueStorageKey = "video-reposter.processing-queue";
+export const customPresetsStorageKey = "video-reposter.custom-presets";
 
 const supportedVideoExtensions = new Set(["mp4", "mov", "avi", "mkv", "webm", "flv"]);
 
@@ -273,6 +275,26 @@ export function getPresetAccess(presets: PlatformPreset[], presetLimit: number) 
     preset,
     included: index < Math.max(0, presetLimit)
   }));
+}
+
+export function loadCustomPresets(storage = getStorage()): PlatformPreset[] {
+  try {
+    const stored = storage?.getItem(customPresetsStorageKey);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored) as unknown[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap(sanitizeCustomPreset).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomPresets(presets: PlatformPreset[], storage = getStorage()) {
+  try {
+    storage?.setItem(customPresetsStorageKey, JSON.stringify(presets.flatMap(sanitizeCustomPreset).slice(0, 20)));
+  } catch {
+    // Local storage can be unavailable in unusual browser contexts.
+  }
 }
 
 export function isNewBatchLocked(items: QueueItem[], running: boolean) {
@@ -541,6 +563,55 @@ function sanitizeQueueFailure(value: unknown): QueueFailure | undefined {
     return { code, message: processingFailureMessages.processingFailed, retryable: true, recovery: "retry_support" };
   }
   return undefined;
+}
+
+function sanitizeCustomPreset(value: unknown): PlatformPreset[] {
+  if (!value || typeof value !== "object") return [];
+  const preset = value as Partial<PlatformPreset>;
+  const settings = sanitizeOutputSettings(preset.settings);
+  const id = sanitizeText(preset.id, 80);
+  const name = sanitizeText(preset.name, 60);
+  if (!id || !name || !settings) return [];
+  return [{ id, name, settings, custom: true }];
+}
+
+function sanitizeOutputSettings(value: unknown): OutputSettings | null {
+  if (!value || typeof value !== "object") return null;
+  const settings = value as Partial<OutputSettings>;
+  const codec = sanitizeVideoCodec(settings.codec);
+  const width = clampNumber(settings.width, 16, 7680, 0);
+  const height = clampNumber(settings.height, 16, 7680, 0);
+  const fps = clampNumber(settings.fps, 1, 120, 0);
+  const videoBitrate = sanitizeBitrate(settings.videoBitrate, "4M");
+  const audioBitrate = sanitizeBitrate(settings.audioBitrate, "128k");
+  if (!width || !height || !fps || !codec) return null;
+  return {
+    width,
+    height,
+    fps,
+    videoBitrate,
+    audioBitrate,
+    codec,
+    maxDurationSeconds: clampOptionalNumber(settings.maxDurationSeconds, 1, 14400),
+    normalizeAudio: Boolean(settings.normalizeAudio) || undefined,
+    crf: clampOptionalNumber(settings.crf, 1, 51),
+    preset: sanitizeText(settings.preset, 24) || undefined
+  };
+}
+
+function sanitizeVideoCodec(value: unknown): VideoCodec | null {
+  return value === "libx264" || value === "libx265" || value === "h264_nvenc" || value === "h264_amf" || value === "h264_qsv" ? value : null;
+}
+
+function sanitizeBitrate(value: unknown, fallback: string) {
+  const text = sanitizeText(value, 16);
+  return /^[1-9]\d*(?:\.\d+)?[kKmM]$/.test(text) ? text : fallback;
+}
+
+function clampOptionalNumber(value: unknown, min: number, max: number) {
+  const next = Number(value);
+  if (!Number.isFinite(next) || next <= 0) return undefined;
+  return Math.min(max, Math.max(min, Math.round(next)));
 }
 
 function sanitizeText(value: unknown, maxLength: number) {

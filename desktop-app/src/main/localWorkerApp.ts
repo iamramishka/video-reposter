@@ -9,6 +9,7 @@ import { isLicenseKey, normalizeLicenseKey, stateFromCache } from "../shared/lic
 import { applyOutputOverrides, buildFfmpegCommand, isSupportedVideoPath, platformPresets, renderOutputFileName } from "../shared/processing.js";
 import { invalidVideoFailure, outputFolderFailure } from "../shared/processingFailure.js";
 import type { DeviceInfo } from "../shared/license.js";
+import { isProcessingTelemetryPayload } from "../shared/telemetry.js";
 import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, OutputOverrides, TransformSettings } from "../shared/processing.js";
 import type { ProcessingJobRequest, ProcessingUpdate } from "./processingService.js";
 
@@ -212,6 +213,16 @@ export function createLocalWorkerApp(options: LocalWorkerAppOptions) {
   api.post("/api/local/processing/stop-job", (req, res, next) => {
     try {
       res.json({ value: processingService.stopJob(String((req.body as { id?: unknown }).id ?? "")) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  api.post("/api/local/telemetry/processing", async (req, res, next) => {
+    try {
+      const body = req.body as { licenseKey?: unknown; payload?: unknown };
+      const licenseKey = typeof body.licenseKey === "string" ? body.licenseKey : "";
+      res.json({ value: isProcessingTelemetryPayload(body.payload) ? await licenseClient.sendProcessingTelemetry(licenseKey, body.payload) : false });
     } catch (error) {
       next(error);
     }

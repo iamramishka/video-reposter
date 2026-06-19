@@ -4,6 +4,7 @@ import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, OutputOverrides
 import type { ProbeResult, ProcessingJobRequest, ProcessingUpdate } from "../main/processingService.js";
 import type { DiskSpaceInfo } from "../main/diskMonitor.js";
 import type { ProcessingAvailability, ProcessingFailureResult } from "../shared/processingFailure.js";
+import type { ProcessingTelemetryPayload } from "../shared/telemetry.js";
 
 contextBridge.exposeInMainWorld("videoReposter", {
   getDeviceInfo: () => ipcRenderer.invoke("license:getDeviceInfo") as Promise<DeviceInfo>,
@@ -29,6 +30,7 @@ contextBridge.exposeInMainWorld("videoReposter", {
   selectVideoFolder: () => ipcRenderer.invoke("files:selectVideoFolder") as Promise<ImportedVideoFile[]>,
   selectOutputFolder: () => ipcRenderer.invoke("files:selectOutputFolder") as Promise<string | null>,
   checkDiskSpace: (targetPath: string) => ipcRenderer.invoke("files:checkDiskSpace", targetPath) as Promise<DiskSpaceInfo>,
+  sendProcessingTelemetry: (licenseKey: string, payload: ProcessingTelemetryPayload) => ipcRenderer.invoke("telemetry:processing", licenseKey, payload) as Promise<boolean>,
   onProcessingUpdate: (callback: (update: ProcessingUpdate) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, update: ProcessingUpdate) => callback(update);
     ipcRenderer.on("processing:update", listener);

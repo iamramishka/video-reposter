@@ -226,7 +226,7 @@ appears, it means a lane edited outside its domain: stop and fix the boundary vi
 
 ## 8. Definition of Done (this parallel effort)
 
-- [ ] All Lane A boxes `[x]`; `npm run ship` green in the desktop worktree.
+- [x] All Lane A boxes `[x]`; `npm run ship` green in the desktop worktree.
 - [ ] All Lane B boxes `[x]`; `npm run ship` green in the backend worktree.
 - [ ] Telemetry end-to-end verified (desktop POST → backend store → admin display).
 - [ ] Both PRs reviewed; security review passed on B1–B5/B10/B11.

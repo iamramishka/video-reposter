@@ -4,6 +4,7 @@ import {
   buildQueueItems,
   buildQueueItemsFromImports,
   canRetryHistoryItem,
+  customPresetsStorageKey,
   currentBatchSettingsFromPreferences,
   estimateQueueEtaSeconds,
   filterHistoryItems,
@@ -21,11 +22,13 @@ import {
   restoredDefaultPreferences,
   summarizeImport,
   historyStorageKey,
+  loadCustomPresets,
   loadHistory,
   loadPreferences,
   loadQueue,
   preferencesStorageKey,
   queueStorageKey,
+  saveCustomPresets,
   saveHistory,
   savePreferences,
   saveQueue,
@@ -207,6 +210,55 @@ describe("renderer state persistence", () => {
     expect(JSON.parse(storage.read(preferencesStorageKey)!)).toEqual(preferences);
     expect(loadHistory(storage)).toHaveLength(50);
     expect(JSON.parse(storage.read(historyStorageKey)!)).toHaveLength(50);
+  });
+
+  it("loads and saves sanitized custom presets", () => {
+    const storage = memoryStorage({
+      [customPresetsStorageKey]: JSON.stringify([
+        {
+          id: " custom-one ",
+          name: " Custom One ",
+          settings: {
+            width: 1280,
+            height: 720,
+            fps: 30,
+            videoBitrate: "6M",
+            audioBitrate: "160k",
+            codec: "libx264",
+            maxDurationSeconds: 120,
+            normalizeAudio: true
+          }
+        },
+        {
+          id: "bad",
+          name: "Bad",
+          settings: { width: 0, height: 0, fps: 0, videoBitrate: "wat", audioBitrate: "wat", codec: "bad" }
+        }
+      ])
+    });
+
+    expect(loadCustomPresets(storage)).toEqual([
+      {
+        id: "custom-one",
+        name: "Custom One",
+        custom: true,
+        settings: {
+          width: 1280,
+          height: 720,
+          fps: 30,
+          videoBitrate: "6M",
+          audioBitrate: "160k",
+          codec: "libx264",
+          maxDurationSeconds: 120,
+          normalizeAudio: true,
+          crf: undefined,
+          preset: undefined
+        }
+      }
+    ]);
+
+    saveCustomPresets(loadCustomPresets(storage), storage);
+    expect(JSON.parse(storage.read(customPresetsStorageKey)!)).toHaveLength(1);
   });
 
   it("preserves safe failure metadata and source details in History", () => {

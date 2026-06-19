@@ -4,6 +4,7 @@ import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, OutputOverrides
 import type { ProbeResult, ProcessingJobRequest, ProcessingUpdate } from "../main/processingService";
 import { componentUnavailableFailure, invalidVideoFailure } from "../shared/processingFailure";
 import type { ProcessingAvailability, ProcessingFailureResult } from "../shared/processingFailure";
+import type { ProcessingTelemetryPayload } from "../shared/telemetry";
 
 export type VideoReposterBridge = {
   getDeviceInfo(): Promise<DeviceInfo>;
@@ -32,6 +33,7 @@ export type VideoReposterBridge = {
   selectVideoFiles(): Promise<ImportedVideoFile[]>;
   selectVideoFolder(): Promise<ImportedVideoFile[]>;
   selectOutputFolder(): Promise<string | null>;
+  sendProcessingTelemetry(licenseKey: string, payload: ProcessingTelemetryPayload): Promise<boolean>;
   onProcessingUpdate(callback: (update: ProcessingUpdate) => void): () => void;
 };
 
@@ -87,6 +89,7 @@ function createLocalWorkerBridge(): VideoReposterBridge {
     selectVideoFiles: () => requestJson<ImportedVideoFile[]>("/files/select-videos"),
     selectVideoFolder: () => requestJson<ImportedVideoFile[]>("/files/select-video-folder"),
     selectOutputFolder: () => requestJson<string | null>("/files/select-output-folder"),
+    sendProcessingTelemetry: (licenseKey, payload) => requestJson<boolean>("/telemetry/processing", { licenseKey, payload }),
     onProcessingUpdate: (callback) => {
       const events = new EventSource(`${localApiBase}/processing/events`);
       events.addEventListener("processing:update", (event) => {
@@ -166,6 +169,7 @@ function createPreviewBridge(): VideoReposterBridge {
     selectVideoFiles: async () => [],
     selectVideoFolder: async () => [],
     selectOutputFolder: async () => null,
+    sendProcessingTelemetry: async () => true,
     onProcessingUpdate: () => () => undefined
   };
 }

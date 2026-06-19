@@ -1,4 +1,4 @@
-export type PlatformPresetId = "instagram-reel" | "youtube-short" | "tiktok" | "twitter-video" | "facebook-reel";
+export type PlatformPresetId = string;
 
 export type VideoCodec = "libx264" | "libx265" | "h264_nvenc" | "h264_amf" | "h264_qsv";
 export type OutputFormat = "mp4" | "mkv" | "mov";
@@ -57,6 +57,7 @@ export type PlatformPreset = {
   id: PlatformPresetId;
   name: string;
   settings: OutputSettings;
+  custom?: boolean;
 };
 
 export type ImportedVideoFile = {

@@ -8,6 +8,7 @@ import { LicenseClient } from "./licenseClient.js";
 import { appendProcessingLog, getProcessingLogPath, trimProcessingLogs } from "./processingLog.js";
 import { ProcessingService } from "./processingService.js";
 import { AutoUpdateService } from "./autoUpdateService.js";
+import { isProcessingTelemetryPayload } from "../shared/telemetry.js";
 import { checkDiskSpace } from "./diskMonitor.js";
 import { getStableDeviceId, readLicenseCache, writeLicenseCache } from "./licenseCache.js";
 import { isLicenseKey, normalizeLicenseKey, stateFromCache } from "../shared/license.js";
@@ -227,6 +228,9 @@ app.whenReady().then(() => {
     };
   });
   ipcMain.handle("processing:stopJob", (_event, id: string) => processingService.stopJob(id));
+  ipcMain.handle("telemetry:processing", (_event, licenseKey: string, payload: unknown) =>
+    isProcessingTelemetryPayload(payload) ? licenseClient.sendProcessingTelemetry(licenseKey, payload) : false
+  );
   ipcMain.handle("files:checkDiskSpace", (_event, targetPath: string) => checkDiskSpace(targetPath));
 
   ipcMain.handle("files:selectVideos", async (event) => {
