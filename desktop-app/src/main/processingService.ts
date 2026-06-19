@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { buildFfmpegArgs, parseFfmpegProgress } from "../shared/processing.js";
 import type { FfmpegJob } from "../shared/processing.js";
 import { classifyProcessingFailure, componentUnavailableFailure, processingFailedFailure } from "../shared/processingFailure.js";
-import type { ProcessingAvailability, ProcessingFailure } from "../shared/processingFailure.js";
+import type { HardwareAccelerationInfo, ProcessingAvailability, ProcessingFailure } from "../shared/processingFailure.js";
 
 const require = createRequire(import.meta.url);
 const ffmpegStatic = require("ffmpeg-static") as string | null;
@@ -22,10 +22,13 @@ export type ProcessingUpdate = {
   currentSeconds?: number;
   message?: string;
   failure?: ProcessingFailure;
+  elapsedMs?: number;
+  throughputMbPerMin?: number;
 };
 
 export type ProcessingJobRequest = FfmpegJob & {
   durationSeconds?: number;
+  inputSizeBytes?: number;
 };
 
 export type ProbeResult = {
@@ -61,6 +64,8 @@ export class ProcessingService {
     const args = buildFfmpegArgs(request);
     const child = this.processFactory(this.tools.ffmpeg, args);
     this.processes.set(id, child);
+    const startedAt = Date.now();
+    const { inputSizeBytes } = request;
 
     // Keep a rolling buffer of the most recent stderr lines so a failed job can
     // report *why* FFmpeg failed instead of just an exit code.
@@ -96,21 +101,25 @@ export class ProcessingService {
 
     child.on("error", (error) => {
       const failure = classifyProcessingFailure(error.message);
-      settle({ id, status: "failed", progress: 0, message: failure.message, failure });
+      settle({ id, status: "failed", progress: 0, message: failure.message, failure, elapsedMs: Date.now() - startedAt });
     });
 
     child.on("close", (code, signal) => {
+      const elapsedMs = Date.now() - startedAt;
       if (signal === "SIGTERM" || signal === "SIGKILL") {
-        settle({ id, status: "stopped", progress: 0, message: "Processing stopped." });
+        settle({ id, status: "stopped", progress: 0, message: "Processing stopped.", elapsedMs });
         return;
       }
       if (code === 0) {
-        settle({ id, status: "complete", progress: 100, message: "Processing complete." });
+        const throughputMbPerMin = inputSizeBytes && elapsedMs > 0
+          ? Math.round((inputSizeBytes / 1e6) / (elapsedMs / 60_000) * 10) / 10
+          : undefined;
+        settle({ id, status: "complete", progress: 100, message: "Processing complete.", elapsedMs, throughputMbPerMin });
         return;
       }
       const reason = stderrTail.length ? ` ${stderrTail.slice(-3).join(" ")}` : "";
       const failure = processingFailedFailure(`FFmpeg exited with code ${code ?? "unknown"}.${reason}`.trim());
-      settle({ id, status: "failed", progress: 0, message: failure.message, failure });
+      settle({ id, status: "failed", progress: 0, message: failure.message, failure, elapsedMs });
     });
 
     return { id, args };
@@ -156,11 +165,56 @@ export class ProcessingService {
       child.on("close", (code) => {
         if (code === 0) {
           const versionLine = output.split(/\r?\n/)[0] || "FFmpeg is available.";
-          settle({ available: true, message: "Video processing is ready.", technicalMessage: versionLine });
+          void this.detectHardwareAcceleration().then((hardwareAcceleration) => {
+            settle({ available: true, message: "Video processing is ready.", technicalMessage: versionLine, hardwareAcceleration });
+          });
           return;
         }
         const failure = componentUnavailableFailure(`FFmpeg check failed with code ${code ?? "unknown"}.`);
         settle({ available: false, message: failure.message, technicalMessage: failure.technicalMessage, failure });
+      });
+    });
+  }
+
+  async detectHardwareAcceleration() {
+    return new Promise<HardwareAccelerationInfo>((resolve) => {
+      const child = this.processFactory(this.tools.ffmpeg, ["-hide_banner", "-encoders"]);
+      let output = "";
+      let errorOutput = "";
+      let settled = false;
+      const settle = (result: HardwareAccelerationInfo) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        output += chunk;
+      });
+      child.stderr.on("data", (chunk: string) => {
+        errorOutput += chunk;
+      });
+      child.on("error", (error) => {
+        settle({
+          available: false,
+          encoders: [],
+          message: "CPU encoding fallback is active.",
+          technicalMessage: error.message
+        });
+      });
+      child.on("close", (code) => {
+        if (code !== 0) {
+          settle({
+            available: false,
+            encoders: [],
+            message: "CPU encoding fallback is active.",
+            technicalMessage: errorOutput.trim() || `FFmpeg encoder check failed with code ${code ?? "unknown"}.`
+          });
+          return;
+        }
+        settle(parseHardwareAcceleration(output));
       });
     });
   }
@@ -205,6 +259,34 @@ export class ProcessingService {
       });
     });
   }
+}
+
+export function parseHardwareAcceleration(output: string): HardwareAccelerationInfo {
+  const encoders: HardwareAccelerationInfo["encoders"] = [];
+  if (/\bh264_nvenc\b/.test(output)) encoders.push("h264_nvenc");
+  if (/\bh264_amf\b/.test(output)) encoders.push("h264_amf");
+  if (/\bh264_qsv\b/.test(output)) encoders.push("h264_qsv");
+
+  if (encoders.length === 0) {
+    return {
+      available: false,
+      encoders,
+      message: "CPU encoding fallback is active.",
+      technicalMessage: "No supported H.264 GPU encoders reported by FFmpeg."
+    };
+  }
+
+  return {
+    available: true,
+    encoders,
+    message: `GPU acceleration available: ${encoders.map(formatHardwareEncoder).join(", ")}.`
+  };
+}
+
+function formatHardwareEncoder(encoder: HardwareAccelerationInfo["encoders"][number]) {
+  if (encoder === "h264_nvenc") return "NVIDIA NVENC";
+  if (encoder === "h264_amf") return "AMD AMF";
+  return "Intel Quick Sync";
 }
 
 function resolveProcessingTools(): ProcessingTools {

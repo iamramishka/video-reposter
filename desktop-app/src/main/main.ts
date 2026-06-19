@@ -5,15 +5,18 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { LicenseClient } from "./licenseClient.js";
-import { appendProcessingLog, getProcessingLogPath } from "./processingLog.js";
+import { appendProcessingLog, getProcessingLogPath, trimProcessingLogs } from "./processingLog.js";
 import { ProcessingService } from "./processingService.js";
+import { AutoUpdateService } from "./autoUpdateService.js";
+import { isProcessingTelemetryPayload } from "../shared/telemetry.js";
+import { checkDiskSpace } from "./diskMonitor.js";
 import { getStableDeviceId, readLicenseCache, writeLicenseCache } from "./licenseCache.js";
 import { isLicenseKey, normalizeLicenseKey, stateFromCache } from "../shared/license.js";
 import { productName } from "../shared/branding.js";
-import { buildFfmpegCommand, isSupportedVideoPath, platformPresets } from "../shared/processing.js";
+import { applyOutputOverrides, buildFfmpegCommand, isSupportedVideoPath, platformPresets, renderOutputFileName } from "../shared/processing.js";
 import { invalidVideoFailure, outputFolderFailure } from "../shared/processingFailure.js";
 import type { ProcessingJobRequest } from "./processingService.js";
-import type { FfmpegJob, ImportedVideoFile, TransformSettings } from "../shared/processing.js";
+import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, OutputOverrides, TransformSettings } from "../shared/processing.js";
 
 const serverUrl = process.env.VITE_LICENSE_SERVER_URL ?? "https://video-reposter.vercel.app";
 const licenseClient = new LicenseClient(serverUrl);
@@ -117,11 +120,11 @@ function getVideoFilesInFolder(folderPath: string) {
   return getImportedVideoFiles(files);
 }
 
-function getDefaultOutputPath(inputPath: string, presetId: string, selectedOutputDir?: string) {
+function getDefaultOutputPath(inputPath: string, presetId: string, selectedOutputDir?: string, outputNaming?: OutputNamingOptions) {
   const parsed = path.parse(inputPath);
   const outputDir = selectedOutputDir?.trim() ? selectedOutputDir : path.join(parsed.dir, "VideoReposterOutput");
   mkdirSync(outputDir, { recursive: true }); // may throw — caller wraps in try-catch
-  return path.join(outputDir, `${parsed.name}_${presetId}_processed.mp4`);
+  return path.join(outputDir, renderOutputFileName(inputPath, presetId, outputNaming));
 }
 
 function showOpenDialogWithParent(event: IpcMainInvokeEvent, options: OpenDialogOptions) {
@@ -135,8 +138,15 @@ function showOpenDialogWithParent(event: IpcMainInvokeEvent, options: OpenDialog
 }
 
 app.whenReady().then(() => {
+  trimProcessingLogs(app.getPath("userData"), 30);
+
   const processingService = new ProcessingService((update) => {
-    appendProcessingLog(app.getPath("userData"), `[${update.status}] ${update.id} ${update.progress}% ${update.failure?.technicalMessage ?? update.message ?? ""}`.trim());
+    let logLine = `[${update.status}] ${update.id} ${update.progress}% ${update.failure?.technicalMessage ?? update.message ?? ""}`.trim();
+    if (update.elapsedMs !== undefined) {
+      logLine += ` | ${(update.elapsedMs / 1000).toFixed(1)}s`;
+      if (update.throughputMbPerMin !== undefined) logLine += ` | ${update.throughputMbPerMin} MB/min`;
+    }
+    appendProcessingLog(app.getPath("userData"), logLine);
     BrowserWindow.getAllWindows().forEach((window) => window.webContents.send("processing:update", update));
   });
 
@@ -186,12 +196,12 @@ app.whenReady().then(() => {
   ipcMain.handle("processing:probeFile", (_event, inputPath: string) => processingService.probeFile(inputPath));
   ipcMain.handle("processing:buildCommand", (_event, job: FfmpegJob) => buildFfmpegCommand(job));
   ipcMain.handle("processing:startJob", (_event, request: ProcessingJobRequest) => processingService.startJob(request));
-  ipcMain.handle("processing:startFile", async (_event, inputPath: string, presetId = "instagram-reel", outputDir?: string, transforms?: TransformSettings) => {
+  ipcMain.handle("processing:startFile", async (_event, inputPath: string, presetId = "instagram-reel", outputDir?: string, transforms?: TransformSettings, outputNaming?: OutputNamingOptions, outputOverrides?: OutputOverrides) => {
     const preset = platformPresets.find((item) => item.id === presetId) ?? platformPresets.find((item) => item.id === "instagram-reel");
     if (!preset) throw new Error("Default processing preset is missing.");
     let outputPath: string;
     try {
-      outputPath = getDefaultOutputPath(inputPath, preset.id, outputDir);
+      outputPath = getDefaultOutputPath(inputPath, preset.id, outputDir, outputNaming);
     } catch (error) {
       const failure = outputFolderFailure(`Could not create output folder: ${error instanceof Error ? error.message : String(error)}`);
       return { ok: false, message: failure.message, failure };
@@ -201,14 +211,16 @@ app.whenReady().then(() => {
       const failure = invalidVideoFailure(probe.message ?? "Video validation failed.");
       return { ok: false, message: failure.message, failure };
     }
+    const inputSizeBytes = (() => { try { return statSync(inputPath).size; } catch { return undefined; } })();
     return {
       ok: true,
       ...processingService.startJob({
         inputPath,
         outputPath,
-        output: preset.settings,
+        output: applyOutputOverrides(preset.settings, outputOverrides),
         transforms,
-        durationSeconds: probe.durationSeconds
+        durationSeconds: probe.durationSeconds,
+        inputSizeBytes
       }),
       outputPath,
       probe,
@@ -216,6 +228,11 @@ app.whenReady().then(() => {
     };
   });
   ipcMain.handle("processing:stopJob", (_event, id: string) => processingService.stopJob(id));
+  ipcMain.handle("telemetry:processing", (_event, licenseKey: string, payload: unknown) =>
+    isProcessingTelemetryPayload(payload) ? licenseClient.sendProcessingTelemetry(licenseKey, payload) : false
+  );
+  ipcMain.handle("files:checkDiskSpace", (_event, targetPath: string) => checkDiskSpace(targetPath));
+
   ipcMain.handle("files:selectVideos", async (event) => {
     const result = await showOpenDialogWithParent(event, {
       title: "Select videos",
@@ -240,6 +257,17 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  const updateService = new AutoUpdateService({
+    app,
+    dialog,
+    getMainWindow: () => mainWindow,
+    updateUrl: process.env.VIDEO_REPOSTER_UPDATE_URL,
+    allowInDev: process.env.VIDEO_REPOSTER_UPDATES_IN_DEV === "1",
+    log: (message) => appendProcessingLog(app.getPath("userData"), message)
+  });
+  updateService.start();
+  app.on("before-quit", () => updateService.stop());
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

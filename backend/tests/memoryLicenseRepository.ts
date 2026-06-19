@@ -9,11 +9,12 @@ export class MemoryLicenseRepository implements LicenseRepository {
   }
 
   list() {
-    return Promise.resolve([...this.records.values()]);
+    return Promise.resolve([...this.records.values()].filter((record) => !record.deletedAt));
   }
 
   findByKey(key: string) {
-    return Promise.resolve(this.records.get(key) ?? null);
+    const record = this.records.get(key);
+    return Promise.resolve(record && !record.deletedAt ? record : null);
   }
 
   create(input: {
@@ -63,6 +64,17 @@ export class MemoryLicenseRepository implements LicenseRepository {
 
   revoke(key: string) {
     return this.patch(key, { status: "revoked" });
+  }
+
+  softDelete(key: string, retentionUntil: Date) {
+    return this.patch(key, {
+      status: "revoked",
+      deviceId: null,
+      hostname: null,
+      os: null,
+      deletedAt: new Date(),
+      retentionUntil
+    });
   }
 
   resetDevice(key: string) {

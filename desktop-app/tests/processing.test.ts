@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyOutputOverrides,
   buildFfmpegArgs,
   buildFfmpegCommand,
+  buildOutputOverrides,
   isSupportedVideoPath,
+  normalizeDimension,
   parseFfmpegProgress,
-  platformPresets
+  platformPresets,
+  renderOutputFileName
 } from "../src/shared/processing";
+import type { OutputSettings } from "../src/shared/processing";
 
 describe("processing command builder", () => {
   it("builds a standard platform preset command", () => {
@@ -28,6 +33,50 @@ describe("processing command builder", () => {
     expect(args).toContain("loudnorm=I=-16:LRA=11:TP=-1.5");
     expect(args).toContain("libx264");
     expect(args).toContain("+faststart");
+  });
+
+  it("keeps the Instagram golden FFmpeg arguments stable", () => {
+    const preset = platformPresets.find((item) => item.id === "instagram-reel");
+    expect(preset).toBeDefined();
+
+    expect(buildFfmpegArgs({
+      inputPath: "in.mp4",
+      outputPath: "out.mp4",
+      output: preset!.settings,
+      transforms: {
+        mirrorHorizontal: true,
+        brightness: 10,
+        saturation: -20,
+        volume: 125
+      }
+    })).toEqual([
+      "-i",
+      "in.mp4",
+      "-t",
+      "90",
+      "-vf",
+      "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,hflip,eq=brightness=0.1:saturation=0.8",
+      "-af",
+      "loudnorm=I=-16:LRA=11:TP=-1.5,volume=1.25",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "fast",
+      "-crf",
+      "23",
+      "-b:v",
+      "4M",
+      "-r",
+      "30",
+      "-movflags",
+      "+faststart",
+      "-y",
+      "out.mp4"
+    ]);
   });
 
   it("combines video and audio transform filters", () => {
@@ -65,6 +114,49 @@ describe("processing command builder", () => {
     );
   });
 
+  it("builds advanced transform filters", () => {
+    const args = buildFfmpegArgs({
+      inputPath: "in.mov",
+      outputPath: "out.mp4",
+      output: { width: 1280, height: 720, fps: 30, videoBitrate: "2M", audioBitrate: "128k", codec: "libx264", maxDurationSeconds: 60 },
+      transforms: {
+        cropPercent: 12,
+        customRotateDegrees: -7,
+        textWatermark: "My Brand",
+        watermarkPosition: "top-left",
+        pitchSemitones: 3,
+        speedPercent: 125,
+        fadeInSeconds: 2,
+        fadeOutSeconds: 4
+      }
+    });
+
+    expect(args[args.indexOf("-vf") + 1]).toContain("crop=iw*0.88:ih*0.88:(iw-ow)/2:(ih-oh)/2");
+    expect(args[args.indexOf("-vf") + 1]).toContain("rotate=-7*PI/180:fillcolor=black");
+    expect(args[args.indexOf("-vf") + 1]).toContain("drawtext=text='My Brand':x=24:y=24");
+    expect(args[args.indexOf("-af") + 1]).toBe("asetrate=44100*1.189,aresample=44100,atempo=0.841,atempo=1.25,afade=t=in:st=0:d=2,afade=t=out:st=56:d=4");
+  });
+
+  it("maps replacement audio and logo watermarks", () => {
+    const args = buildFfmpegArgs({
+      inputPath: "in.mov",
+      outputPath: "out.mp4",
+      output: { width: 1280, height: 720, fps: 30, videoBitrate: "2M", audioBitrate: "128k", codec: "libx264" },
+      transforms: {
+        logoWatermarkPath: "C:/brand/logo.png",
+        replaceAudioPath: "C:/audio/track.mp3",
+        watermarkPosition: "center"
+      }
+    });
+
+    expect(args).toContain("C:/audio/track.mp3");
+    expect(args).toContain("C:/brand/logo.png");
+    expect(args[args.indexOf("-filter_complex") + 1]).toBe(
+      "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black[base];[2:v]scale=180:-1[logo];[base][logo]overlay=x=(W-w)/2:y=(H-h)/2[vout]"
+    );
+    expect(args).toEqual(expect.arrayContaining(["-map", "[vout]", "-map", "1:a:0", "-shortest"]));
+  });
+
   it("strips audio when requested", () => {
     const args = buildFfmpegArgs({
       inputPath: "in.webm",
@@ -97,6 +189,14 @@ describe("processing helpers", () => {
     expect(isSupportedVideoPath("clip.txt")).toBe(false);
   });
 
+  it("renders safe output filenames from naming templates", () => {
+    expect(renderOutputFileName("C:/clips/raw clip.mp4", "instagram-reel")).toBe("raw clip_instagram-reel_processed.mp4");
+    expect(renderOutputFileName("C:/clips/raw:clip.mp4", "youtube-short", { template: "{preset}_{name}_{date}", format: "mkv" })).toMatch(
+      /^youtube-short_raw_clip_\d{8}\.mkv$/
+    );
+    expect(renderOutputFileName("C:/clips/raw.mp4", "youtube-short", { template: "   ", format: "mov" })).toBe("raw_youtube-short_processed.mov");
+  });
+
   it("parses ffmpeg progress lines", () => {
     expect(parseFfmpegProgress("frame= 123 fps=30 time=00:00:30.00 bitrate=800kbits/s", 120)).toEqual({
       currentSeconds: 30,
@@ -104,5 +204,57 @@ describe("processing helpers", () => {
     });
     expect(parseFfmpegProgress("no timing here", 120)).toBeNull();
     expect(parseFfmpegProgress("time=00:10:00.00", 100)).toEqual({ currentSeconds: 600, progress: 99 });
+  });
+});
+
+describe("output overrides", () => {
+  const base: OutputSettings = { width: 1080, height: 1920, fps: 30, videoBitrate: "4M", audioBitrate: "128k", codec: "libx264", crf: 23, preset: "fast" };
+
+  it("returns the original settings when no overrides are given", () => {
+    expect(applyOutputOverrides(base)).toEqual(base);
+    expect(applyOutputOverrides(base, { quality: "preset" })).toEqual(base);
+  });
+
+  it("maps quality levels to crf and encoder preset", () => {
+    expect(applyOutputOverrides(base, { quality: "low" })).toMatchObject({ crf: 30, preset: "veryfast" });
+    expect(applyOutputOverrides(base, { quality: "medium" })).toMatchObject({ crf: 23, preset: "fast" });
+    expect(applyOutputOverrides(base, { quality: "high" })).toMatchObject({ crf: 18, preset: "slow" });
+  });
+
+  it("applies a custom resolution only when both dimensions are valid", () => {
+    expect(applyOutputOverrides(base, { width: 1280, height: 720 })).toMatchObject({ width: 1280, height: 720 });
+    // A single dimension is ignored (aspect ratio cannot be inferred safely).
+    expect(applyOutputOverrides(base, { width: 1280 })).toMatchObject({ width: 1080, height: 1920 });
+  });
+
+  it("normalizes dimensions to even values within range", () => {
+    expect(normalizeDimension(1281)).toBe(1282);
+    expect(normalizeDimension(720)).toBe(720);
+    expect(normalizeDimension(8)).toBeUndefined();
+    expect(normalizeDimension(99999)).toBeUndefined();
+    expect(normalizeDimension(undefined)).toBeUndefined();
+    expect(normalizeDimension(Number.NaN)).toBeUndefined();
+  });
+
+  it("buildOutputOverrides parses string dimensions into numbers", () => {
+    expect(buildOutputOverrides("preset", "1280", "720")).toMatchObject({ quality: "preset", width: 1280, height: 720 });
+    expect(buildOutputOverrides("high", "1920", "1080")).toMatchObject({ quality: "high", width: 1920, height: 1080 });
+  });
+
+  it("buildOutputOverrides returns undefined dims for blank or invalid strings", () => {
+    const result = buildOutputOverrides("medium", "", "");
+    expect(result.width).toBeUndefined();
+    expect(result.height).toBeUndefined();
+  });
+
+  it("buildOutputOverrides returns undefined dims for non-numeric strings", () => {
+    const result = buildOutputOverrides("low", "abc", "xyz");
+    expect(result.width).toBeUndefined();
+    expect(result.height).toBeUndefined();
+  });
+
+  it("buildOutputOverrides returns undefined dims for negative or zero values", () => {
+    expect(buildOutputOverrides("preset", "-100", "0").width).toBeUndefined();
+    expect(buildOutputOverrides("preset", "-100", "0").height).toBeUndefined();
   });
 });

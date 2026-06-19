@@ -44,6 +44,15 @@ export class SupabaseRestClient {
     }).then((rows) => requireReturnedRow(table, rows));
   }
 
+  updateMany(table: string, query: QueryParams, body: Record<string, unknown>) {
+    return this.request<unknown[]>(table, {
+      method: "PATCH",
+      query,
+      body: { ...body, updatedAt: new Date().toISOString() },
+      headers: { Prefer: "return=minimal" }
+    });
+  }
+
   private async request<T>(
     table: string,
     options: {

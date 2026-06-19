@@ -1,8 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  AlertTriangle,
+  Check,
+  Clock,
   Cloud,
   Copy,
+  Edit2,
   Film,
   FolderOpen,
   Home,
@@ -17,20 +21,24 @@ import {
   Plus,
   RotateCcw,
   RotateCw,
+  Save,
   Settings,
   Shield,
   ShieldCheck,
   Square,
   ShoppingCart,
+  Trash2,
+  Upload,
   X
 } from "lucide-react";
 import type { CachedLicense, DeviceInfo, LicenseState, PackageLimits } from "../shared/license";
 import { isLicenseKey, licenseRefreshDescription, licenseStateLabel, normalizeLicenseKey, packageLimitsForLicense } from "../shared/license";
 import { productName, productTagline } from "../shared/branding";
-import { platformPresets } from "../shared/processing";
-import type { ImportedVideoFile, PlatformPreset, TransformSettings } from "../shared/processing";
+import { buildOutputOverrides, isSupportedVideoPath, platformPresets, qualityLevels } from "../shared/processing";
+import type { ImportedVideoFile, OutputNamingOptions, OutputSettings, PlatformPreset, QualityLevel, TransformSettings, VideoCodec } from "../shared/processing";
 import { invalidVideoFailure, processingFailedFailure } from "../shared/processingFailure";
 import type { ProcessingAvailability, ProcessingFailure } from "../shared/processingFailure";
+import { buildProcessingTelemetryPayload } from "../shared/telemetry";
 import { createVideoReposterBridge, getBridgeMode, usesNativeFileDialogs } from "./bridge";
 import {
   buildQueueItems,
@@ -41,9 +49,11 @@ import {
   canRetryHistoryItem,
   defaultPreferences,
   defaultTransforms,
+  estimateQueueEtaSeconds,
   filterHistoryItems,
   formatBytes,
   formatDuration,
+  formatEta,
   formatHistoryDate,
   formatVideoFormat,
   getFinishedQueueItems,
@@ -51,16 +61,20 @@ import {
   getPresetAccess,
   getProcessingActionState,
   getQueueTotals,
+  getWorkerPoolState,
   importSourceLabel,
   isNewBatchLocked,
+  loadCustomPresets,
   loadHistory,
   loadPreferences,
   loadQueue,
   queueStatusLabel,
   restoredDefaultPreferences,
+  saveCustomPresets,
   saveHistory,
   savePreferences,
   saveQueue,
+  summarizeImport,
   summarizeTransforms
 } from "./state";
 import type { HistoryFilter, HistoryItem, ImportSource, ProcessingPreferences, QueueFailure, QueueItem } from "./state";
@@ -128,12 +142,14 @@ function ActivationScreen({
 }) {
   const [key, setKey] = useState("");
   const [error, setError] = useState("");
+  const [errorCode, setErrorCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [showBuyPopup, setShowBuyPopup] = useState(false);
   const normalized = useMemo(() => normalizeLicenseKey(key), [key]);
 
   async function activate() {
     setError("");
+    setErrorCode("");
     if (!isLicenseKey(normalized)) {
       setError("Use format VDRP-XXXX-XXXX-XXXX-XXXX.");
       return;
@@ -145,6 +161,7 @@ function ActivationScreen({
       onActivated(result.license as CachedLicense);
       return;
     }
+    setErrorCode(result.code ?? "");
     setError(result.message ?? "Activation failed. Please try again.");
   }
 
@@ -204,6 +221,13 @@ function ActivationScreen({
         </div>
 
         {(error || blockedMessage) && <div className="error">{error || blockedMessage}</div>}
+        {(errorCode === "LIC_003" || blockedState === "DEVICE_MISMATCH") && (
+          <DeviceConflictHelp
+            device={device}
+            licenseKey={normalized}
+            onContact={() => videoReposterBridge.openExternal("https://wa.me/94784324261")}
+          />
+        )}
 
         <button className="primary-action" onClick={activate} disabled={busy}>
           <ShieldCheck size={22} />
@@ -277,20 +301,32 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   const [activeView, setActiveView] = useState<ViewKey>("dashboard");
   const [items, setItems] = useState<QueueItem[]>(loadQueue);
   const [running, setRunning] = useState(false);
+  const [batchStartedAt, setBatchStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [logs, setLogs] = useState<string[]>(["Ready for video import."]);
   const [importStatus, setImportStatus] = useState("");
-  const [presets, setPresets] = useState<PlatformPreset[]>(platformPresets);
+  const [basePresets, setBasePresets] = useState<PlatformPreset[]>(platformPresets);
+  const [customPresets, setCustomPresets] = useState<PlatformPreset[]>(loadCustomPresets);
   const [history, setHistory] = useState<HistoryItem[]>(loadHistory);
   const [queueClearConfirmation, setQueueClearConfirmation] = useState<"finished" | "all" | null>(null);
   const [processingAvailability, setProcessingAvailability] = useState<ProcessingAvailability | null>(null);
   const [currentBatchPresetId, setCurrentBatchPresetId] = useState(() => currentBatchSettingsFromPreferences(loadPreferences()).presetId);
   const [currentBatchOutputDir, setCurrentBatchOutputDir] = useState(() => currentBatchSettingsFromPreferences(loadPreferences()).outputDir);
   const [currentBatchMaxWorkers, setCurrentBatchMaxWorkers] = useState(() => currentBatchSettingsFromPreferences(loadPreferences()).maxWorkers);
+  const [currentBatchOutputNaming, setCurrentBatchOutputNaming] = useState(() => currentBatchSettingsFromPreferences(loadPreferences()).outputNaming);
+  const [currentBatchQuality, setCurrentBatchQuality] = useState<QualityLevel>("preset");
+  const [customResolution, setCustomResolution] = useState<{ width: string; height: string }>({ width: "", height: "" });
   const videoPickerRef = useRef<HTMLInputElement | null>(null);
   const folderPickerRef = useRef<HTMLInputElement | null>(null);
   const historyIds = useRef(new Set(history.map((item) => item.id)));
+  const telemetryIds = useRef(new Set<string>());
+  const autoOpenOutputRef = useRef(preferences.autoOpenOutput);
+  const dragCounterRef = useRef(0);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const totals = useMemo(() => getQueueTotals(items), [items]);
+  const etaSeconds = running && batchStartedAt !== null ? estimateQueueEtaSeconds(totals.overall, now - batchStartedAt) : undefined;
   const packageLimits = useMemo(() => packageLimitsForLicense(license), [license]);
+  const presets = useMemo(() => [...basePresets, ...customPresets], [basePresets, customPresets]);
   const visiblePresets = useMemo(() => presets.slice(0, packageLimits.template_limit), [packageLimits.template_limit, presets]);
   const defaultPresetId = preferences.defaultPresetId;
   const transforms = preferences.transforms;
@@ -298,10 +334,14 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     () => getProcessingActionState(items, processingAvailability?.available ?? null, running),
     [items, processingAvailability?.available, running]
   );
+  const workerPool = useMemo(
+    () => getWorkerPoolState(items, currentBatchMaxWorkers, packageLimits.worker_limit),
+    [currentBatchMaxWorkers, items, packageLimits.worker_limit]
+  );
 
   useEffect(() => {
     videoReposterBridge.getProcessingPresets().then((nextPresets) => {
-      if (nextPresets.length) setPresets(nextPresets);
+      if (nextPresets.length) setBasePresets(nextPresets);
     });
     videoReposterBridge.checkFfmpeg().then((result) => {
       setProcessingAvailability(result);
@@ -321,6 +361,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
                     ? toQueueFailure(update.failure ?? processingFailedFailure(update.message ?? "Processing failed without details."))
                     : undefined;
                   recordHistoryItem(item, update.status, failure?.message ?? update.message, failure);
+                  void reportProcessingTelemetry(item, update, failure);
                 }
                 return {
                 ...item,
@@ -354,12 +395,31 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   }, [history]);
 
   useEffect(() => {
+    saveCustomPresets(customPresets);
+  }, [customPresets]);
+
+  useEffect(() => {
     savePreferences(preferences);
   }, [preferences]);
 
   useEffect(() => {
+    autoOpenOutputRef.current = preferences.autoOpenOutput;
+  }, [preferences.autoOpenOutput]);
+
+  useEffect(() => {
     saveQueue(items);
   }, [items]);
+
+  useEffect(() => {
+    if (!running) {
+      setBatchStartedAt(null);
+      return undefined;
+    }
+    setBatchStartedAt((current) => current ?? Date.now());
+    setNow(Date.now());
+    const ticker = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(ticker);
+  }, [running]);
 
   useEffect(() => {
     const item = items.find((next) => next.path && !next.metadataState);
@@ -407,6 +467,13 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     if (items.length > 0 && activeCount === 0 && items.every((item) => item.status === "complete" || item.status === "failed")) {
       setRunning(false);
       appendLog(setLogs, "Batch complete.");
+      if (autoOpenOutputRef.current) {
+        const firstOutput = items.find((item) => item.status === "complete" && item.outputPath)?.outputPath;
+        if (firstOutput) {
+          void videoReposterBridge.showItemInFolder(firstOutput);
+          appendLog(setLogs, "Opened the output folder for the completed batch.");
+        }
+      }
     }
   }, [items, running, currentBatchMaxWorkers]);
 
@@ -514,6 +581,11 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     }
   }
 
+  function clearCurrentBatchOutputFolder() {
+    setCurrentBatchOutputDir("");
+    appendLog(setLogs, "Current batch output folder reset to the source folder.");
+  }
+
   async function chooseDefaultOutputFolder() {
     appendLog(setLogs, "Opening default output folder picker...");
     try {
@@ -529,6 +601,11 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     }
   }
 
+  function clearDefaultOutputFolder() {
+    setPreferences((current) => ({ ...current, outputDir: "" }));
+    appendLog(setLogs, "Default output folder reset to the source folder.");
+  }
+
   function updateTransforms(next: React.SetStateAction<TransformSettings>) {
     setPreferences((current) => ({
       ...current,
@@ -541,6 +618,24 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     appendLog(setLogs, `Default preset changed to ${presets.find((preset) => preset.id === id)?.name ?? id}.`);
   }
 
+  function saveCustomPreset(preset: PlatformPreset) {
+    setCustomPresets((current) => {
+      const nextPreset = { ...preset, custom: true };
+      const exists = current.some((item) => item.id === nextPreset.id);
+      return exists ? current.map((item) => item.id === nextPreset.id ? nextPreset : item) : [...current, nextPreset];
+    });
+    appendLog(setLogs, `Saved custom preset ${preset.name}.`);
+  }
+
+  function deleteCustomPreset(id: string) {
+    const fallbackPresetId = basePresets[0]?.id ?? defaultPreferences.defaultPresetId;
+    const deleted = customPresets.find((preset) => preset.id === id);
+    setCustomPresets((current) => current.filter((preset) => preset.id !== id));
+    setPreferences((current) => current.defaultPresetId === id ? { ...current, defaultPresetId: fallbackPresetId } : current);
+    setCurrentBatchPresetId((current) => current === id ? fallbackPresetId : current);
+    appendLog(setLogs, `Deleted custom preset ${deleted?.name ?? id}.`);
+  }
+
   function updateDefaultMaxWorkers(value: number) {
     const next = Math.min(clampWorkers(value), packageLimits.worker_limit);
     if (next < value) appendLog(setLogs, `Your ${packageLabel(license)} package allows ${packageLimits.worker_limit} concurrent worker${packageLimits.worker_limit === 1 ? "" : "s"}.`);
@@ -551,6 +646,19 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     const next = Math.min(clampWorkers(value), packageLimits.worker_limit);
     if (next < value) appendLog(setLogs, `Your ${packageLabel(license)} package allows ${packageLimits.worker_limit} concurrent worker${packageLimits.worker_limit === 1 ? "" : "s"}.`);
     setCurrentBatchMaxWorkers(next);
+  }
+
+  function updateDefaultOutputNaming(next: Partial<OutputNamingOptions>) {
+    setPreferences((current) => ({ ...current, outputNaming: { ...current.outputNaming, ...next } }));
+  }
+
+  function updateAutoOpenOutput(value: boolean) {
+    setPreferences((current) => ({ ...current, autoOpenOutput: value }));
+    appendLog(setLogs, value ? "Output folder will open automatically when a batch finishes." : "Automatic output folder opening turned off.");
+  }
+
+  function updateCurrentBatchOutputNaming(next: Partial<OutputNamingOptions>) {
+    setCurrentBatchOutputNaming((current) => ({ ...current, ...next }));
   }
 
   function restoreDefaultSettings() {
@@ -578,6 +686,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   async function launchQueueItem(item: QueueItem) {
     const attemptedItem = {
       ...item,
+      presetId: currentBatchPresetId,
       presetName: visiblePresets.find((preset) => preset.id === currentBatchPresetId)?.name ?? currentBatchPresetId,
       transformSummary: summarizeTransforms(transforms)
     };
@@ -591,9 +700,10 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     }
 
     setItems((current) => current.map((next) => (next.id === item.id ? { ...next, status: "starting", progress: 0, failure: undefined } : next)));
+    const outputOverrides = buildOutputOverrides(currentBatchQuality, customResolution.width, customResolution.height);
     let started: Awaited<ReturnType<typeof videoReposterBridge.startProcessingFile>>;
     try {
-      started = await videoReposterBridge.startProcessingFile(item.path, currentBatchPresetId, currentBatchOutputDir || undefined, cleanTransforms(transforms));
+      started = await videoReposterBridge.startProcessingFile(item.path, currentBatchPresetId, currentBatchOutputDir || undefined, cleanTransforms(transforms), currentBatchOutputNaming, outputOverrides);
     } catch (error) {
       const failure = processingFailedFailure(error instanceof Error ? error.message : "Processing request failed.");
       const queueFailure = toQueueFailure(failure);
@@ -617,6 +727,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
               status: "processing",
               processingJobId: started.id,
               outputPath: started.outputPath,
+              presetId: currentBatchPresetId,
               presetName: started.preset.name,
               transformSummary: summarizeTransforms(transforms),
               durationSeconds: started.probe.durationSeconds,
@@ -632,9 +743,30 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     );
   }
 
+  async function reportProcessingTelemetry(item: QueueItem, update: { id: string; status: string; elapsedMs?: number; throughputMbPerMin?: number }, failure?: QueueFailure) {
+    if (!license?.license_key || telemetryIds.current.has(update.id)) return;
+    const payload = buildProcessingTelemetryPayload({
+      jobId: update.id,
+      status: update.status,
+      preset: item.presetId ?? currentBatchPresetId,
+      elapsedMs: update.elapsedMs,
+      throughputMbPerMin: update.throughputMbPerMin,
+      inputSizeBytes: item.size,
+      errorCode: failure?.code
+    });
+    if (!payload) return;
+    telemetryIds.current.add(update.id);
+    try {
+      await videoReposterBridge.sendProcessingTelemetry(license.license_key, payload);
+    } catch {
+      // Telemetry is best-effort and must never affect local processing.
+    }
+  }
+
   function pauseBatch() {
     if (processingActions.pauseDisabled) return;
     setRunning(false);
+    setItems((current) => current.map((item) => item.status === "queued" ? { ...item, status: "paused" } : item));
     appendLog(setLogs, "Paused queue scheduling. Active FFmpeg jobs will continue.");
   }
 
@@ -762,7 +894,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
       <div className="stats-grid">
         <Stat label="Total Videos" value={String(items.length)} meta={formatBytes(totals.bytes)} />
         <Stat label="Completed" value={String(totals.complete)} meta={`${totals.overall}% overall`} />
-        <Stat label="Processing" value={String(totals.processing)} meta={running ? "Workers active" : "Workers idle"} />
+        <Stat label="Processing" value={String(totals.processing)} meta={running ? (etaSeconds !== undefined ? formatEta(etaSeconds) : "Workers active") : "Workers idle"} />
         <Stat label="Failed" value={String(totals.failed)} meta="Needs review" />
       </div>
     );
@@ -779,6 +911,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
 
   function renderNewBatchPage() {
     const batchItems = getNewBatchItems(items);
+    const importSummary = summarizeImport(batchItems);
     if (isNewBatchLocked(items, running)) {
       return (
         <section className="panel batch-handoff">
@@ -808,6 +941,14 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
           {batchItems.length === 0 ? (
             <EmptyQueue />
           ) : (
+            <>
+            <div className="import-summary-bar" role="status" aria-live="polite">
+              <span><strong>{importSummary.count}</strong> video{importSummary.count === 1 ? "" : "s"}</span>
+              <span><strong>{formatBytes(importSummary.totalBytes)}</strong> total</span>
+              <span className="import-summary-ok"><strong>{importSummary.ready}</strong> validated</span>
+              {importSummary.checking > 0 && <span className="import-summary-checking"><strong>{importSummary.checking}</strong> checking</span>}
+              {importSummary.unreadable > 0 && <span className="import-summary-bad"><strong>{importSummary.unreadable}</strong> unreadable</span>}
+            </div>
             <div className="new-batch-video-list">
               {batchItems.map((item) => (
                 <QueueItemRow
@@ -820,6 +961,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
                 />
               ))}
             </div>
+            </>
           )}
         </section>
         <section className="panel batch-destination">
@@ -833,9 +975,87 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
               {visiblePresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
             </select>
           </div>
+          <div className="output-folder-picker">
+            <label>Output Folder</label>
+            <div className="output-folder-row">
+              <span className="output-folder-path" title={currentBatchOutputDir || "Same folder as source video"}>
+                {currentBatchOutputDir ? currentBatchOutputDir : <em>Same folder as source</em>}
+              </span>
+              <button type="button" aria-label="Choose current batch output folder" onClick={chooseCurrentBatchOutputFolder}>
+                <FolderOpen size={15} /> Choose
+              </button>
+              {currentBatchOutputDir && (
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Clear output folder and reset to same folder as source"
+                  title="Reset to same folder as source"
+                  onClick={clearCurrentBatchOutputFolder}
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+          </div>
           <div>
-            <span>Current Batch Output</span>
-            <strong>{currentBatchOutputDir || "Same folder as source"}</strong>
+            <label htmlFor="new-batch-output-template">Output Name</label>
+            <input
+              id="new-batch-output-template"
+              type="text"
+              value={currentBatchOutputNaming.template}
+              maxLength={120}
+              onChange={(event) => updateCurrentBatchOutputNaming({ template: event.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="new-batch-output-format">Output Format</label>
+            <select
+              id="new-batch-output-format"
+              value={currentBatchOutputNaming.format}
+              onChange={(event) => updateCurrentBatchOutputNaming({ format: event.target.value as OutputNamingOptions["format"] })}
+            >
+              <option value="mp4">MP4</option>
+              <option value="mkv">MKV</option>
+              <option value="mov">MOV</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="new-batch-quality">Quality</label>
+            <select
+              id="new-batch-quality"
+              value={currentBatchQuality}
+              onChange={(event) => setCurrentBatchQuality(event.target.value as QualityLevel)}
+            >
+              {qualityLevels.map((level) => <option key={level} value={level}>{qualityLabel(level)}</option>)}
+            </select>
+          </div>
+          <div className="resolution-inputs">
+            <label>Custom Resolution <small>(optional — leave blank to use preset)</small></label>
+            <div className="resolution-fields">
+              <input
+                id="new-batch-res-width"
+                type="number"
+                min={16}
+                max={7680}
+                step={2}
+                placeholder="Width px"
+                aria-label="Custom output width in pixels"
+                value={customResolution.width}
+                onChange={(event) => setCustomResolution((prev) => ({ ...prev, width: event.target.value }))}
+              />
+              <span aria-hidden="true">×</span>
+              <input
+                id="new-batch-res-height"
+                type="number"
+                min={16}
+                max={7680}
+                step={2}
+                placeholder="Height px"
+                aria-label="Custom output height in pixels"
+                value={customResolution.height}
+                onChange={(event) => setCustomResolution((prev) => ({ ...prev, height: event.target.value }))}
+              />
+            </div>
           </div>
           <div>
             <label htmlFor="new-batch-workers">Current Batch Workers</label>
@@ -848,7 +1068,6 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
               onChange={(event) => updateCurrentBatchMaxWorkers(Number(event.target.value))}
             />
           </div>
-          <button aria-label="Choose current batch output folder" title="Choose current batch output folder" onClick={chooseCurrentBatchOutputFolder}><FolderOpen size={17} /> Choose Folder</button>
         </section>
         <TransformPanel transforms={transforms} running={false} onChange={updateTransforms} />
         <section className="new-batch-start">
@@ -866,7 +1085,8 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   function renderQueuePage() {
     const finishedItemCount = getFinishedQueueItems(items).length;
     const hasFinishedItems = finishedItemCount > 0;
-    const startLabel = running ? "Running" : processingActions.activeCount > 0 ? "Resume" : "Start";
+    const hasPausedItems = items.some((item) => item.status === "paused");
+    const startLabel = running ? "Running" : (processingActions.activeCount > 0 || hasPausedItems) ? "Resume" : "Start";
     return (
       <>
         {renderStats()}
@@ -875,6 +1095,11 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
             <div>
               <h2>Processing Queue</h2>
               <p>{items.length ? `${items.length} item${items.length === 1 ? "" : "s"} in the current queue.` : "No items in the current queue."}</p>
+              {running && (
+                <p className="queue-eta" role="status" aria-live="polite">
+                  <Clock size={15} /> {formatEta(etaSeconds)}
+                </p>
+              )}
             </div>
             <div className="queue-level-actions">
               <button className="solid" onClick={startBatch} disabled={processingActions.startDisabled}><Play size={17} /> {startLabel}</button>
@@ -885,6 +1110,52 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
             </div>
           </div>
           {processingActions.startReason && <p className="queue-action-hint" role="status">{processingActions.startReason}</p>}
+          <section className="worker-pool-panel" aria-label="Worker pool">
+            <div>
+              <span>Active</span>
+              <strong>{workerPool.activeCount}</strong>
+            </div>
+            <div>
+              <span>Queued</span>
+              <strong>{workerPool.queuedCount}</strong>
+            </div>
+            <div>
+              <span>Available Slots</span>
+              <strong>{workerPool.availableSlots}</strong>
+            </div>
+            <label>
+              <span>Workers</span>
+              <div className="worker-stepper">
+                <button
+                  aria-label="Decrease current batch workers"
+                  disabled={workerPool.maxWorkers <= 1}
+                  onClick={() => updateCurrentBatchMaxWorkers(workerPool.maxWorkers - 1)}
+                >
+                  -
+                </button>
+                <input
+                  aria-label="Current batch workers"
+                  min={1}
+                  max={workerPool.workerLimit}
+                  type="number"
+                  value={workerPool.maxWorkers}
+                  onChange={(event) => updateCurrentBatchMaxWorkers(Number(event.target.value))}
+                />
+                <button
+                  aria-label="Increase current batch workers"
+                  disabled={workerPool.maxWorkers >= workerPool.workerLimit}
+                  onClick={() => updateCurrentBatchMaxWorkers(workerPool.maxWorkers + 1)}
+                >
+                  +
+                </button>
+              </div>
+            </label>
+            <p>
+              {workerPool.saturated
+                ? "All worker slots are busy. Increase workers or wait for a job to finish."
+                : `Package limit: ${workerPool.workerLimit} worker${workerPool.workerLimit === 1 ? "" : "s"}.`}
+            </p>
+          </section>
           {items.length === 0 ? (
             <div className="queue-empty">
               <ListVideo size={32} />
@@ -994,13 +1265,17 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
           packageName={packageLabel(license)}
           defaultPresetId={defaultPresetId}
           onSetDefault={updateDefaultPreset}
+          onSaveCustomPreset={saveCustomPreset}
+          onDeleteCustomPreset={deleteCustomPreset}
         />
       ) : null;
     }
     return (
       <SettingsPanel
         defaultOutputDir={preferences.outputDir}
+        defaultOutputNaming={preferences.outputNaming}
         defaultMaxWorkers={preferences.maxWorkers}
+        autoOpenOutput={preferences.autoOpenOutput}
         workerLimit={packageLimits.worker_limit}
         restoreDefaultPresetName={
           visiblePresets.find((preset) => preset.id === defaultPreferences.defaultPresetId)?.name
@@ -1010,27 +1285,53 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
         state={state}
         license={license}
         packageLimits={packageLimits}
+        processingAvailability={processingAvailability}
         onChooseDefaultOutputFolder={chooseDefaultOutputFolder}
+        onClearDefaultOutputFolder={clearDefaultOutputFolder}
+        onDefaultOutputNamingChange={updateDefaultOutputNaming}
         onDefaultMaxWorkersChange={updateDefaultMaxWorkers}
+        onAutoOpenOutputChange={updateAutoOpenOutput}
         onRestoreDefaultSettings={restoreDefaultSettings}
         onOpenLog={() => videoReposterBridge.openProcessingLog()}
       />
     );
   }
 
+  const canDrop = !isNewBatchLocked(items, running);
+
   return (
     <main
-      className="dashboard-shell"
+      className={`dashboard-shell${isDraggingOver && canDrop ? " drag-active" : ""}`}
+      onDragEnter={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        dragCounterRef.current += 1;
+        if (dragCounterRef.current === 1) setIsDraggingOver(true);
+      }}
       onDragOver={(event) => {
         event.preventDefault();
-        event.dataTransfer.dropEffect = activeView === "new-batch" && !isNewBatchLocked(items, running) ? "copy" : "none";
+        event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
+      }}
+      onDragLeave={() => {
+        dragCounterRef.current -= 1;
+        if (dragCounterRef.current === 0) setIsDraggingOver(false);
       }}
       onDrop={(event) => {
         event.preventDefault();
-        if (activeView !== "new-batch" || isNewBatchLocked(items, running)) return;
+        dragCounterRef.current = 0;
+        setIsDraggingOver(false);
+        if (!canDrop) return;
+        setActiveView("new-batch");
         importFiles(event.dataTransfer.files, "drop");
       }}
     >
+      {isDraggingOver && canDrop && (
+        <div className="drag-overlay" aria-hidden="true">
+          <div className="drag-overlay-inner">
+            <Upload size={40} />
+            <p>Drop videos here</p>
+          </div>
+        </div>
+      )}
       <aside className="dashboard-sidebar">
         <div className="app-title"><Film /> {productName}</div>
         {navItems.map((item) => (
@@ -1358,80 +1659,353 @@ function PresetGallery({
   presetLimit,
   packageName,
   defaultPresetId,
-  onSetDefault
+  onSetDefault,
+  onSaveCustomPreset,
+  onDeleteCustomPreset
 }: {
   presets: PlatformPreset[];
   presetLimit: number;
   packageName: string;
   defaultPresetId: string;
   onSetDefault: (id: string) => void;
+  onSaveCustomPreset: (preset: PlatformPreset) => void;
+  onDeleteCustomPreset: (id: string) => void;
 }) {
   const presetAccess = getPresetAccess(presets, presetLimit);
   const includedCount = presetAccess.filter((item) => item.included).length;
+  const [editingPreset, setEditingPreset] = useState<PlatformPreset | null>(null);
   return (
-    <section className="panel preset-gallery">
-      <div className="panel-title">
-        <div>
-          <h2>Platform Presets</h2>
-          <p>Your default preset is applied when preparing a new batch.</p>
+    <>
+      <section className="panel preset-gallery">
+        <div className="panel-title">
+          <div>
+            <h2>Platform Presets</h2>
+            <p>Your default preset is applied when preparing a new batch.</p>
+          </div>
+          <div className="preset-title-actions">
+            <span className="preset-access-summary">{includedCount} of {presets.length} included in {packageName}</span>
+            <button onClick={() => setEditingPreset(createCustomPresetDraft(presets[0]))}><Plus size={15} /> Custom Preset</button>
+          </div>
         </div>
-        <span className="preset-access-summary">{includedCount} of {presets.length} included in {packageName}</span>
-      </div>
-      <div className="preset-grid">
-        {presetAccess.map(({ preset, included }) => {
-          const isDefault = preset.id === defaultPresetId;
-          return (
-            <article className={`preset-card${isDefault ? " selected" : ""}${included ? "" : " restricted"}`} key={preset.id}>
-              <div className="preset-card-title">
-                <strong>{preset.name}</strong>
-                <div className="preset-card-badges">
-                  {isDefault && <span className="preset-badge">Default</span>}
-                  <span className={included ? "preset-badge included" : "preset-badge restricted"}>{included ? "Included" : "Not included"}</span>
+        <div className="preset-grid">
+          {presetAccess.map(({ preset, included }) => {
+            const isDefault = preset.id === defaultPresetId;
+            return (
+              <article className={`preset-card${isDefault ? " selected" : ""}${included ? "" : " restricted"}`} key={preset.id}>
+                <div className="preset-card-title">
+                  <strong>{preset.name}</strong>
+                  <div className="preset-card-badges">
+                    {isDefault && <span className="preset-badge">Default</span>}
+                    {preset.custom && <span className="preset-badge custom">Custom</span>}
+                    <span className={included ? "preset-badge included" : "preset-badge restricted"}>{included ? "Included" : "Not included"}</span>
+                  </div>
                 </div>
-              </div>
-              <dl className="preset-details">
-                <div><dt>Resolution</dt><dd>{preset.settings.width}x{preset.settings.height}</dd></div>
-                <div><dt>Frame rate</dt><dd>{preset.settings.fps} fps</dd></div>
-                <div><dt>Video</dt><dd>{preset.settings.codec} · {preset.settings.videoBitrate}</dd></div>
-                <div><dt>Audio</dt><dd>{preset.settings.audioBitrate}</dd></div>
-                <div><dt>Max length</dt><dd>{preset.settings.maxDurationSeconds ? `${preset.settings.maxDurationSeconds} seconds` : "No preset limit"}</dd></div>
-              </dl>
-              {!included && (
-                <p className="preset-restriction"><Lock size={15} /> Your {packageName} package includes {includedCount} preset{includedCount === 1 ? "" : "s"}.</p>
-              )}
-              <button onClick={() => onSetDefault(preset.id)} disabled={isDefault || !included}>
-                {isDefault ? "Current Default" : included ? "Set as Default" : "Not Included in Package"}
-              </button>
-            </article>
-          );
-        })}
+                <dl className="preset-details">
+                  <div><dt>Resolution</dt><dd>{preset.settings.width}x{preset.settings.height}</dd></div>
+                  <div><dt>Frame rate</dt><dd>{preset.settings.fps} fps</dd></div>
+                  <div><dt>Video</dt><dd>{preset.settings.codec} / {preset.settings.videoBitrate}</dd></div>
+                  <div><dt>Audio</dt><dd>{preset.settings.audioBitrate}{preset.settings.normalizeAudio ? " / normalized" : ""}</dd></div>
+                  <div><dt>Max length</dt><dd>{preset.settings.maxDurationSeconds ? `${preset.settings.maxDurationSeconds} seconds` : "No preset limit"}</dd></div>
+                </dl>
+                {!included && (
+                  <p className="preset-restriction"><Lock size={15} /> Your {packageName} package includes {includedCount} preset{includedCount === 1 ? "" : "s"}.</p>
+                )}
+                <div className="preset-card-actions">
+                  <button onClick={() => onSetDefault(preset.id)} disabled={isDefault || !included}>
+                    {isDefault ? <Check size={15} /> : null}
+                    {isDefault ? "Current Default" : included ? "Set as Default" : "Not Included in Package"}
+                  </button>
+                  <button onClick={() => setEditingPreset(preset.custom ? preset : createCustomPresetDraft(preset))}>
+                    <Edit2 size={15} /> {preset.custom ? "Edit" : "Clone"}
+                  </button>
+                  {preset.custom && (
+                    <button className="danger" onClick={() => onDeleteCustomPreset(preset.id)} disabled={isDefault}>
+                      <Trash2 size={15} /> Delete
+                    </button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+      {editingPreset && (
+        <PresetEditorDialog
+          preset={editingPreset}
+          onCancel={() => setEditingPreset(null)}
+          onSave={(preset) => {
+            onSaveCustomPreset(preset);
+            setEditingPreset(null);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function DeviceConflictHelp({ device, licenseKey, onContact }: { device: DeviceInfo; licenseKey: string; onContact: () => void }) {
+  const hasKey = isLicenseKey(licenseKey);
+  const supportMessage = [
+    "Hi, I need to reset the device binding for my Video Reposter license.",
+    "",
+    `License key: ${hasKey ? licenseKey : "(enter key above first)"}`,
+    `Device name: ${device.deviceName}`,
+    `Device ID:   ${device.deviceId.slice(0, 24).toUpperCase()}`,
+    "",
+    "Please reset the device binding so I can activate on this computer. Thank you."
+  ].join("\n");
+
+  return (
+    <section className="device-conflict-panel" aria-label="Device conflict recovery">
+      <div>
+        <AlertTriangle size={20} />
+        <strong>License already active on another device</strong>
+      </div>
+      <ol className="device-conflict-steps">
+        <li>If you still have access to the old device, uninstall Video Reposter there first.</li>
+        <li>Copy the support message below and send it to the support team.</li>
+        <li>Once support resets the binding, click <strong>Activate License</strong> above.</li>
+      </ol>
+      <dl>
+        <div><dt>This device</dt><dd title={device.deviceName}>{device.deviceName}</dd></div>
+        <div><dt>Device ID</dt><dd>{device.deviceId.slice(0, 24).toUpperCase()}</dd></div>
+        <div><dt>License</dt><dd>{hasKey ? licenseKey : <em>Enter the key above</em>}</dd></div>
+      </dl>
+      <div className="device-conflict-actions">
+        <button onClick={() => void copyText(supportMessage)} title="Copy a pre-filled support message to your clipboard"><Copy size={16} /> Copy Support Message</button>
+        <button onClick={onContact}><ShoppingCart size={16} /> Contact Support</button>
       </div>
     </section>
   );
 }
 
+type PresetDraft = {
+  id: string;
+  name: string;
+  width: string;
+  height: string;
+  fps: string;
+  videoBitrate: string;
+  audioBitrate: string;
+  codec: VideoCodec;
+  maxDurationSeconds: string;
+  normalizeAudio: boolean;
+  crf: string;
+  encoderPreset: string;
+};
+
+function PresetEditorDialog({ preset, onCancel, onSave }: { preset: PlatformPreset; onCancel: () => void; onSave: (preset: PlatformPreset) => void }) {
+  const [draft, setDraft] = useState<PresetDraft>(() => presetToDraft(preset));
+  const settings = draftToPresetSettings(draft);
+  const canSave = Boolean(draft.name.trim() && settings);
+
+  function setValue<K extends keyof PresetDraft>(key: K, value: PresetDraft[K]) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onCancel}>
+      <section
+        aria-labelledby="preset-editor-title"
+        aria-modal="true"
+        className="preset-editor-modal"
+        role="dialog"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-title">
+          <div>
+            <h3 id="preset-editor-title">Custom Preset</h3>
+            <p>Save encoder settings for repeat batches.</p>
+          </div>
+          <button className="modal-close inline" aria-label="Close custom preset editor" title="Close" onClick={onCancel}><X size={18} /></button>
+        </div>
+        <div className="preset-editor-grid">
+          <label>
+            <span>Name</span>
+            <input value={draft.name} maxLength={60} onChange={(event) => setValue("name", event.target.value)} />
+          </label>
+          <label>
+            <span>Width</span>
+            <input type="number" min={16} max={7680} step={2} value={draft.width} onChange={(event) => setValue("width", event.target.value)} />
+          </label>
+          <label>
+            <span>Height</span>
+            <input type="number" min={16} max={7680} step={2} value={draft.height} onChange={(event) => setValue("height", event.target.value)} />
+          </label>
+          <label>
+            <span>FPS</span>
+            <input type="number" min={1} max={120} value={draft.fps} onChange={(event) => setValue("fps", event.target.value)} />
+          </label>
+          <label>
+            <span>Video Bitrate</span>
+            <input value={draft.videoBitrate} placeholder="4M" onChange={(event) => setValue("videoBitrate", event.target.value)} />
+          </label>
+          <label>
+            <span>Audio Bitrate</span>
+            <input value={draft.audioBitrate} placeholder="128k" onChange={(event) => setValue("audioBitrate", event.target.value)} />
+          </label>
+          <label>
+            <span>Codec</span>
+            <select value={draft.codec} onChange={(event) => setValue("codec", event.target.value as VideoCodec)}>
+              <option value="libx264">H.264 CPU</option>
+              <option value="libx265">H.265 CPU</option>
+              <option value="h264_nvenc">NVIDIA NVENC</option>
+              <option value="h264_amf">AMD AMF</option>
+              <option value="h264_qsv">Intel Quick Sync</option>
+            </select>
+          </label>
+          <label>
+            <span>Max Seconds</span>
+            <input type="number" min={1} max={14400} placeholder="Optional" value={draft.maxDurationSeconds} onChange={(event) => setValue("maxDurationSeconds", event.target.value)} />
+          </label>
+          <label>
+            <span>CRF <small title="0–51; lower = better quality. Leave blank to use bitrate-only mode.">(?)</small></span>
+            <input type="number" min={0} max={51} placeholder="Optional (e.g. 23)" value={draft.crf} onChange={(event) => setValue("crf", event.target.value)} />
+          </label>
+          <label>
+            <span>Encoder Speed</span>
+            <select value={draft.encoderPreset} onChange={(event) => setValue("encoderPreset", event.target.value)}>
+              <option value="">Default</option>
+              <option value="ultrafast">Ultrafast</option>
+              <option value="superfast">Superfast</option>
+              <option value="veryfast">Very Fast</option>
+              <option value="faster">Faster</option>
+              <option value="fast">Fast</option>
+              <option value="medium">Medium</option>
+              <option value="slow">Slow</option>
+              <option value="slower">Slower</option>
+              <option value="veryslow">Very Slow</option>
+            </select>
+          </label>
+          <label className="settings-toggle preset-editor-toggle">
+            <input type="checkbox" checked={draft.normalizeAudio} onChange={(event) => setValue("normalizeAudio", event.target.checked)} />
+            <span>Normalize audio</span>
+          </label>
+        </div>
+        {!settings && <p className="preset-editor-error"><AlertTriangle size={15} /> Use valid dimensions, FPS, bitrate values like 4M or 128k, and CRF 0–51.</p>}
+        <div className="confirmation-actions">
+          <button onClick={onCancel}>Cancel</button>
+          <button
+            className="confirm"
+            disabled={!canSave}
+            onClick={() => {
+              if (!settings) return;
+              onSave({ id: draft.id, name: draft.name.trim(), settings, custom: true });
+            }}
+          >
+            <Save size={15} /> Save Preset
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function createCustomPresetDraft(base?: PlatformPreset): PlatformPreset {
+  const settings = base?.settings ?? platformPresets.find((preset) => preset.id === "instagram-reel")?.settings ?? {
+    width: 1080,
+    height: 1920,
+    fps: 30,
+    videoBitrate: "4M",
+    audioBitrate: "128k",
+    codec: "libx264"
+  };
+  const name = base ? `${base.name} Custom` : "Custom Preset";
+  return {
+    id: `custom-${Date.now().toString(36)}`,
+    name,
+    settings: { ...settings },
+    custom: true
+  };
+}
+
+function presetToDraft(preset: PlatformPreset): PresetDraft {
+  return {
+    id: preset.id,
+    name: preset.name,
+    width: String(preset.settings.width),
+    height: String(preset.settings.height),
+    fps: String(preset.settings.fps),
+    videoBitrate: preset.settings.videoBitrate,
+    audioBitrate: preset.settings.audioBitrate,
+    codec: preset.settings.codec,
+    maxDurationSeconds: preset.settings.maxDurationSeconds ? String(preset.settings.maxDurationSeconds) : "",
+    normalizeAudio: Boolean(preset.settings.normalizeAudio),
+    crf: preset.settings.crf !== undefined ? String(preset.settings.crf) : "",
+    encoderPreset: preset.settings.preset ?? ""
+  };
+}
+
+function draftToPresetSettings(draft: PresetDraft): OutputSettings | null {
+  const width = parsePresetInteger(draft.width, 16, 7680);
+  const height = parsePresetInteger(draft.height, 16, 7680);
+  const fps = parsePresetInteger(draft.fps, 1, 120);
+  const maxDurationSeconds = draft.maxDurationSeconds.trim() ? parsePresetInteger(draft.maxDurationSeconds, 1, 14400) : undefined;
+  if (!width || !height || !fps || maxDurationSeconds === null) return null;
+  if (!isBitrateValue(draft.videoBitrate) || !isBitrateValue(draft.audioBitrate)) return null;
+  const crf = draft.crf.trim() ? parsePresetInteger(draft.crf, 0, 51) : undefined;
+  if (crf === null) return null;
+  const encoderPreset = draft.encoderPreset.trim() || undefined;
+  return {
+    width: width % 2 === 0 ? width : width + 1,
+    height: height % 2 === 0 ? height : height + 1,
+    fps,
+    videoBitrate: draft.videoBitrate.trim(),
+    audioBitrate: draft.audioBitrate.trim(),
+    codec: draft.codec,
+    maxDurationSeconds,
+    normalizeAudio: draft.normalizeAudio || undefined,
+    crf: crf ?? undefined,
+    preset: encoderPreset
+  };
+}
+
+function parsePresetInteger(value: string, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const rounded = Math.round(parsed);
+  if (rounded < min || rounded > max) return null;
+  return rounded;
+}
+
+function isBitrateValue(value: string) {
+  return /^[1-9]\d*(?:\.\d+)?[kKmM]$/.test(value.trim());
+}
+
 function SettingsPanel({
   defaultOutputDir,
+  defaultOutputNaming,
   defaultMaxWorkers,
+  autoOpenOutput,
   workerLimit,
   restoreDefaultPresetName,
   state,
   license,
   packageLimits,
+  processingAvailability,
   onChooseDefaultOutputFolder,
+  onClearDefaultOutputFolder,
+  onDefaultOutputNamingChange,
   onDefaultMaxWorkersChange,
+  onAutoOpenOutputChange,
   onRestoreDefaultSettings,
   onOpenLog
 }: {
   defaultOutputDir: string;
+  defaultOutputNaming: Required<OutputNamingOptions>;
   defaultMaxWorkers: number;
+  autoOpenOutput: boolean;
   workerLimit: number;
   restoreDefaultPresetName: string;
   state: LicenseState;
   license: CachedLicense | null;
   packageLimits: PackageLimits;
+  processingAvailability: ProcessingAvailability | null;
   onChooseDefaultOutputFolder: () => void;
+  onClearDefaultOutputFolder: () => void;
+  onDefaultOutputNamingChange: (value: Partial<OutputNamingOptions>) => void;
   onDefaultMaxWorkersChange: (value: number) => void;
+  onAutoOpenOutputChange: (value: boolean) => void;
   onRestoreDefaultSettings: () => void;
   onOpenLog: () => void;
 }) {
@@ -1462,6 +2036,13 @@ function SettingsPanel({
             <Cloud size={18} />
             <span>{licenseRefreshDescription(state)}</span>
           </div>
+          <div className={processingAvailability?.hardwareAcceleration?.available ? "gpu-status available" : "gpu-status fallback"}>
+            <Settings size={18} />
+            <div>
+              <strong>{processingAvailability?.hardwareAcceleration?.available ? "GPU acceleration ready" : "CPU fallback active"}</strong>
+              <span>{processingAvailability?.hardwareAcceleration?.message ?? "Checking FFmpeg encoder support."}</span>
+            </div>
+          </div>
         </section>
         <section className="panel settings-card">
         <div className="panel-title">
@@ -1474,10 +2055,32 @@ function SettingsPanel({
         <div className="settings-default-folder">
           <InfoLine icon={<FolderOpen />} label="Default Output" value={defaultOutputDir || "Same folder as source"} />
           <button title="Choose the output folder used by new batches" onClick={onChooseDefaultOutputFolder}>Choose Default Folder</button>
+          <button title="Reset the default output folder to the source folder" onClick={onClearDefaultOutputFolder} disabled={!defaultOutputDir}>Use Source Folder</button>
         </div>
         <label className="settings-control">
           <span>Default Workers</span>
           <input type="number" min={1} max={workerLimit} value={defaultMaxWorkers} onChange={(event) => onDefaultMaxWorkersChange(Number(event.target.value))} />
+        </label>
+        <label className="settings-control">
+          <span>Default Output Name</span>
+          <input
+            type="text"
+            value={defaultOutputNaming.template}
+            maxLength={120}
+            onChange={(event) => onDefaultOutputNamingChange({ template: event.target.value })}
+          />
+        </label>
+        <label className="settings-control">
+          <span>Default Output Format</span>
+          <select value={defaultOutputNaming.format} onChange={(event) => onDefaultOutputNamingChange({ format: event.target.value as OutputNamingOptions["format"] })}>
+            <option value="mp4">MP4</option>
+            <option value="mkv">MKV</option>
+            <option value="mov">MOV</option>
+          </select>
+        </label>
+        <label className="settings-toggle">
+          <input type="checkbox" checked={autoOpenOutput} onChange={(event) => onAutoOpenOutputChange(event.target.checked)} />
+          <span>Open the output folder automatically when a batch finishes</span>
         </label>
         </section>
         <section className="panel settings-card">
@@ -1501,6 +2104,7 @@ function SettingsPanel({
             <p>The following saved defaults will be restored:</p>
             <ul className="confirmation-list">
               <li><strong>Output folder:</strong> Same folder as source</li>
+              <li><strong>Output naming:</strong> {defaultPreferences.outputNaming.template}.{defaultPreferences.outputNaming.format}</li>
               <li><strong>Workers:</strong> {Math.min(defaultPreferences.maxWorkers, workerLimit)}</li>
               <li><strong>Preset:</strong> {restoreDefaultPresetName}</li>
               <li><strong>Adjustments:</strong> Mirror, flip, and mute off; rotation 0 deg; scale and volume 100%; color and sharpness neutral</li>
@@ -1528,6 +2132,13 @@ function SettingsPanel({
 function packageLabel(license: CachedLicense | null) {
   const plan = license?.plan ?? "pro";
   return plan.charAt(0).toUpperCase() + plan.slice(1);
+}
+
+function qualityLabel(level: QualityLevel) {
+  if (level === "preset") return "Preset default";
+  if (level === "low") return "Low (smaller file)";
+  if (level === "medium") return "Medium";
+  return "High (best quality)";
 }
 
 async function copyText(value: string) {
@@ -1619,11 +2230,64 @@ function TransformPanel({
       </div>
       <div className="slider-grid">
         <Slider label="Scale" min={100} max={200} value={transforms.scalePercent ?? 100} suffix="%" disabled={running} onChange={(value) => setValue("scalePercent", value)} />
+        <Slider label="Crop" min={0} max={40} value={transforms.cropPercent ?? 0} suffix="%" disabled={running} onChange={(value) => setValue("cropPercent", value)} />
+        <Slider label="Custom Rotate" min={-180} max={180} value={transforms.customRotateDegrees ?? 0} suffix=" deg" disabled={running} onChange={(value) => setValue("customRotateDegrees", value)} />
         <Slider label="Brightness" min={-50} max={50} value={transforms.brightness ?? 0} disabled={running} onChange={(value) => setValue("brightness", value)} />
         <Slider label="Contrast" min={-50} max={50} value={transforms.contrast ?? 0} disabled={running} onChange={(value) => setValue("contrast", value)} />
         <Slider label="Saturation" min={-50} max={50} value={transforms.saturation ?? 0} disabled={running} onChange={(value) => setValue("saturation", value)} />
         <Slider label="Sharpness" min={0} max={100} value={transforms.sharpness ?? 0} disabled={running} onChange={(value) => setValue("sharpness", value)} />
-        <Slider label="Volume" min={0} max={150} value={transforms.volume ?? 100} disabled={running || transforms.removeAudio} onChange={(value) => setValue("volume", value)} />
+        <Slider label="Volume" min={0} max={150} value={transforms.volume ?? 100} disabled={running || Boolean(transforms.removeAudio)} onChange={(value) => setValue("volume", value)} />
+        <Slider label="Pitch" min={-12} max={12} value={transforms.pitchSemitones ?? 0} suffix=" st" disabled={running || Boolean(transforms.removeAudio)} onChange={(value) => setValue("pitchSemitones", value)} />
+        <Slider label="Speed" min={50} max={200} value={transforms.speedPercent ?? 100} suffix="%" disabled={running || Boolean(transforms.removeAudio)} onChange={(value) => setValue("speedPercent", value)} />
+        <Slider label="Fade In" min={0} max={10} value={transforms.fadeInSeconds ?? 0} suffix="s" disabled={running || Boolean(transforms.removeAudio)} onChange={(value) => setValue("fadeInSeconds", value)} />
+        <Slider label="Fade Out" min={0} max={10} value={transforms.fadeOutSeconds ?? 0} suffix="s" disabled={running || Boolean(transforms.removeAudio)} onChange={(value) => setValue("fadeOutSeconds", value)} />
+      </div>
+      <div className="advanced-transform-grid">
+        <label>
+          <span>Text Watermark</span>
+          <input
+            type="text"
+            value={transforms.textWatermark ?? ""}
+            disabled={running}
+            maxLength={80}
+            placeholder="Brand or caption"
+            onChange={(event) => setValue("textWatermark", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Logo Path</span>
+          <input
+            type="text"
+            value={transforms.logoWatermarkPath ?? ""}
+            disabled={running}
+            placeholder="C:\\brand\\logo.png"
+            onChange={(event) => setValue("logoWatermarkPath", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Watermark Position</span>
+          <select
+            value={transforms.watermarkPosition ?? "bottom-right"}
+            disabled={running}
+            onChange={(event) => setValue("watermarkPosition", event.target.value as TransformSettings["watermarkPosition"])}
+          >
+            <option value="bottom-right">Bottom right</option>
+            <option value="bottom-left">Bottom left</option>
+            <option value="top-right">Top right</option>
+            <option value="top-left">Top left</option>
+            <option value="center">Center</option>
+          </select>
+        </label>
+        <label>
+          <span>Replacement Audio</span>
+          <input
+            type="text"
+            value={transforms.replaceAudioPath ?? ""}
+            disabled={running || Boolean(transforms.removeAudio)}
+            placeholder="C:\\audio\\track.mp3"
+            onChange={(event) => setValue("replaceAudioPath", event.target.value)}
+          />
+        </label>
       </div>
     </section>
   );

@@ -1,5 +1,12 @@
 # 🌳 Main Worktree — Master Execution Plan
 
+> **Historical reference.** This document was written during the pre-implementation planning phase.
+> The execution flows and agent maps remain valid. The "Tech Stack Recommendation" table at the
+> bottom reflects pre-implementation options and is now stale — the actual stack uses
+> `ffmpeg-static`/`ffprobe-static` (not fluent-ffmpeg), Prisma/PostgreSQL (SQLite is not
+> installed), and a plain Vite + React SPA for the admin dashboard (not Next.js or Tauri).
+> For the authoritative stack, see `CLAUDE.md` and `docs/decisions/0002-claude-config-architecture.md`.
+
 ## Overview
 This is the top-level workflow document for the Video Reposter system. It defines the complete execution tree from startup to shutdown, showing how every agent, skill, and component interconnects.
 

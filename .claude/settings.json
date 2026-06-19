@@ -1,59 +1,93 @@
 {
-  "version": "1.0",
-  "project": "Video Reposter — Batch Processing & License Management System",
-  "description": "Windows desktop app for batch video processing with online license activation and admin dashboard.",
-  "model": "claude-opus-4-5",
-  "context_files": [
-    ".claude/common-prompt.md",
-    "docs/plan.md",
-    "docs/requirements.md",
-    "README.md"
-  ],
-  "design_references": [
-    "Designs/License Activation.png",
-    "Designs/Dashboard.png",
-    "Designs/Admin Dashboard.png",
-    "Designs/License.png"
-  ],
-  "worktree_refs": [
-    "Claude/Worktree/main-worktree.md",
-    "Claude/Worktree/initialization.md",
-    "Claude/Worktree/processing-queue.md",
-    "Claude/Worktree/monitoring.md",
-    "Claude/Worktree/admin-actions.md",
-    "Claude/Worktree/export-logs.md"
-  ],
-  "agent_refs": [
-    "Claude/Agents/license-agent.md",
-    "Claude/Agents/processing-agent.md",
-    "Claude/Agents/analytics-agent.md",
-    "Claude/Agents/user-agent.md"
-  ],
-  "skill_refs": [
-    "Claude/Skills/license-validation.md",
-    "Claude/Skills/batch-processing.md",
-    "Claude/Skills/analytics-reporting.md",
-    "Claude/Skills/notification-system.md",
-    "Claude/Skills/auto-update-detection.md"
-  ],
-  "rules": {
-    "always_read_plan_first": true,
-    "always_check_design_for_ui_tasks": true,
-    "never_hardcode_secrets": true,
-    "use_env_variables": true,
-    "keep_code_modular": true,
-    "test_after_implementation": true
+  "model": "sonnet",
+  "env": {
+    "VIDEO_REPOSTER_PROJECT": "Video Reposter",
+    "VIDEO_REPOSTER_DEFAULT_GATE": "npm run ship"
   },
-  "color_palette": {
-    "primary": "#3B82F6",
-    "primary_hover": "#2563EB",
-    "primary_active": "#1D4ED8",
-    "background_dark": "#0F172A",
-    "surface": "#1E293B",
-    "text_primary": "#F8FAFC",
-    "text_secondary": "#94A3B8",
-    "success": "#22C55E",
-    "warning": "#F59E0B",
-    "error": "#EF4444"
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Select-String *)",
+      "PowerShell(git status *)",
+      "PowerShell(git diff *)",
+      "PowerShell(git log *)",
+      "PowerShell(git branch *)",
+      "PowerShell(npm test)",
+      "PowerShell(npm run test *)",
+      "PowerShell(npm run build)",
+      "PowerShell(npm run typecheck)",
+      "PowerShell(npm run lint)",
+      "PowerShell(npm run ship)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(npm test)",
+      "Bash(npm run test *)",
+      "Bash(npm run build)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run lint)",
+      "Bash(npm run ship)"
+    ],
+    "ask": [
+      "PowerShell(git commit *)",
+      "PowerShell(git push *)",
+      "PowerShell(git worktree *)",
+      "PowerShell(npm install *)",
+      "PowerShell(npm uninstall *)",
+      "PowerShell(npm update *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git worktree *)",
+      "Bash(npm install *)",
+      "Bash(npm uninstall *)",
+      "Bash(npm update *)",
+      "Agent(model:opus)",
+      "Agent(isolation:worktree)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.development)",
+      "Read(**/.env.production)",
+      "Read(**/.env.*.local)",
+      "Read(**/*.pem)",
+      "Read(**/*.p12)",
+      "PowerShell(Remove-Item * -Recurse *)",
+      "PowerShell(rm * -r *)",
+      "PowerShell(rm * -rf *)",
+      "Bash(rm -rf *)",
+      "Bash(curl * | sh)",
+      "Bash(wget * | sh)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -File .claude/hooks/pre-commit-guard.ps1 -Mode TouchedWorkspace"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "PowerShell|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -File .claude/hooks/pre-commit-guard.ps1 -Mode CommitCommand"
+          }
+        ]
+      }
+    ]
   }
 }

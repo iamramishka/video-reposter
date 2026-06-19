@@ -36,6 +36,12 @@ const bulkCreateSchema = z.object({
   }).optional()
 });
 
+const retentionSchema = z.object({
+  retentionDays: z.number().int().min(1).max(3650).default(30)
+});
+
+const keyParamSchema = z.object({ key: z.string().min(1) });
+
 function sendError(error: unknown, res: import("express").Response) {
   if (error instanceof LicenseError) {
     return res.status(error.statusCode).json({ code: error.code, message: error.message });
@@ -74,6 +80,14 @@ export function createLicenseRouter(service: LicenseService, options: { requireA
     } catch (error) {
       const response = sendError(error, res);
       if (!response) next(error);
+    }
+  });
+
+  router.post("/licenses/expiry-reminders/run", ...writableAdminOnly, async (_req, res, next) => {
+    try {
+      res.json({ reminders: await service.sendExpiryReminders() });
+    } catch (error) {
+      next(error);
     }
   });
 
@@ -118,6 +132,17 @@ export function createLicenseRouter(service: LicenseService, options: { requireA
     try {
       const body = z.object({ key: z.string() }).parse(req.body);
       res.json({ license: await service.revoke(body.key, getAdminActor(req)) });
+    } catch (error) {
+      const response = sendError(error, res);
+      if (!response) next(error);
+    }
+  });
+
+  router.delete("/license/:key", ...writableAdminOnly, async (req, res, next) => {
+    try {
+      const { key } = keyParamSchema.parse(req.params);
+      const body = retentionSchema.parse(req.body ?? {});
+      res.json({ license: await service.softDelete(key, body.retentionDays, getAdminActor(req)) });
     } catch (error) {
       const response = sendError(error, res);
       if (!response) next(error);

@@ -1,9 +1,10 @@
 import { platformPresets } from "../shared/processing";
 import type { CachedLicense, DeviceInfo, LicenseState } from "../shared/license";
-import type { FfmpegJob, ImportedVideoFile, PlatformPreset, TransformSettings } from "../shared/processing";
+import type { FfmpegJob, ImportedVideoFile, OutputNamingOptions, OutputOverrides, PlatformPreset, TransformSettings } from "../shared/processing";
 import type { ProbeResult, ProcessingJobRequest, ProcessingUpdate } from "../main/processingService";
 import { componentUnavailableFailure, invalidVideoFailure } from "../shared/processingFailure";
 import type { ProcessingAvailability, ProcessingFailureResult } from "../shared/processingFailure";
+import type { ProcessingTelemetryPayload } from "../shared/telemetry";
 
 export type VideoReposterBridge = {
   getDeviceInfo(): Promise<DeviceInfo>;
@@ -24,12 +25,15 @@ export type VideoReposterBridge = {
     path: string,
     presetId: string,
     outputDir?: string,
-    transforms?: TransformSettings
+    transforms?: TransformSettings,
+    outputNaming?: OutputNamingOptions,
+    outputOverrides?: OutputOverrides
   ): Promise<{ ok: true; id: string; args: string[]; outputPath: string; probe: ProbeResult; preset: PlatformPreset } | ProcessingFailureResult>;
   stopProcessingJob(id: string): Promise<boolean>;
   selectVideoFiles(): Promise<ImportedVideoFile[]>;
   selectVideoFolder(): Promise<ImportedVideoFile[]>;
   selectOutputFolder(): Promise<string | null>;
+  sendProcessingTelemetry(licenseKey: string, payload: ProcessingTelemetryPayload): Promise<boolean>;
   onProcessingUpdate(callback: (update: ProcessingUpdate) => void): () => void;
 };
 
@@ -79,12 +83,13 @@ function createLocalWorkerBridge(): VideoReposterBridge {
     probeVideoFile: (inputPath) => requestJson<ProbeResult>("/processing/probe-file", { inputPath }),
     buildProcessingCommand: (job) => requestJson<string>("/processing/build-command", { job }),
     startProcessingJob: (job) => requestJson<{ id: string; args: string[] }>("/processing/start-job", { job }),
-    startProcessingFile: (inputPath, presetId = "instagram-reel", outputDir, transforms) =>
-      requestJson("/processing/start-file", { inputPath, presetId, outputDir, transforms }),
+    startProcessingFile: (inputPath, presetId = "instagram-reel", outputDir, transforms, outputNaming, outputOverrides) =>
+      requestJson("/processing/start-file", { inputPath, presetId, outputDir, transforms, outputNaming, outputOverrides }),
     stopProcessingJob: (id) => requestJson<boolean>("/processing/stop-job", { id }),
     selectVideoFiles: () => requestJson<ImportedVideoFile[]>("/files/select-videos"),
     selectVideoFolder: () => requestJson<ImportedVideoFile[]>("/files/select-video-folder"),
     selectOutputFolder: () => requestJson<string | null>("/files/select-output-folder"),
+    sendProcessingTelemetry: (licenseKey, payload) => requestJson<boolean>("/telemetry/processing", { licenseKey, payload }),
     onProcessingUpdate: (callback) => {
       const events = new EventSource(`${localApiBase}/processing/events`);
       events.addEventListener("processing:update", (event) => {
@@ -140,7 +145,18 @@ function createPreviewBridge(): VideoReposterBridge {
     openProcessingLog: async () => "",
     checkFfmpeg: async () => {
       const failure = componentUnavailableFailure("Processing is unavailable in browser preview mode.");
-      return { available: false, message: failure.message, technicalMessage: failure.technicalMessage, failure };
+      return {
+        available: false,
+        message: failure.message,
+        technicalMessage: failure.technicalMessage,
+        hardwareAcceleration: {
+          available: false,
+          encoders: [],
+          message: "CPU encoding fallback is active.",
+          technicalMessage: "Browser preview mode cannot inspect FFmpeg encoders."
+        },
+        failure
+      };
     },
     probeVideoFile: async () => ({ valid: false, message: invalidVideoFailure("Video probing is unavailable in browser preview mode.").message }),
     buildProcessingCommand: async () => "",
@@ -153,6 +169,7 @@ function createPreviewBridge(): VideoReposterBridge {
     selectVideoFiles: async () => [],
     selectVideoFolder: async () => [],
     selectOutputFolder: async () => null,
+    sendProcessingTelemetry: async () => true,
     onProcessingUpdate: () => () => undefined
   };
 }

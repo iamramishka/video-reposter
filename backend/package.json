@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "prisma generate && tsc -p tsconfig.json",
+    "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "start": "node dist/src/server.js",
+    "license:reminders": "tsx src/jobs/sendExpiryReminders.ts",
     "pretest": "prisma generate",
     "test": "vitest run",
     "db:generate": "prisma generate",
@@ -16,7 +18,7 @@
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.0",
+    "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
@@ -24,6 +26,9 @@
     "express-rate-limit": "^8.1.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^9.0.1",
+    "pdfkit": "^0.19.1",
+    "stripe": "^22.2.2",
     "zod": "^4.1.12"
   },
   "devDependencies": {
@@ -31,11 +36,13 @@
     "@types/express": "^5.0.5",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
-    "@types/supertest": "^6.0.3",
-    "prisma": "^6.19.0",
+    "@types/nodemailer": "^8.0.1",
+    "@types/pdfkit": "^0.17.6",
+    "@types/supertest": "^7.2.0",
+    "prisma": "^6.19.3",
     "supertest": "^7.1.4",
     "tsx": "^4.20.6",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "vitest": "^4.0.8"
   }
 }

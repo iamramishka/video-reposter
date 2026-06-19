@@ -4,24 +4,31 @@ import {
   buildQueueItems,
   buildQueueItemsFromImports,
   canRetryHistoryItem,
+  customPresetsStorageKey,
   currentBatchSettingsFromPreferences,
+  estimateQueueEtaSeconds,
   filterHistoryItems,
   formatDuration,
+  formatEta,
   formatVideoFormat,
   getFinishedQueueItems,
   getNewBatchItems,
   getPresetAccess,
   getProcessingActionState,
+  getWorkerPoolState,
   importSourceLabel,
   isNewBatchLocked,
   queueStatusLabel,
   restoredDefaultPreferences,
+  summarizeImport,
   historyStorageKey,
+  loadCustomPresets,
   loadHistory,
   loadPreferences,
   loadQueue,
   preferencesStorageKey,
   queueStorageKey,
+  saveCustomPresets,
   saveHistory,
   savePreferences,
   saveQueue,
@@ -91,6 +98,10 @@ describe("renderer state persistence", () => {
         selectedPresetId: "not-real",
         outputDir: "C:/Output",
         maxWorkers: 99,
+        outputNaming: {
+          template: "  {preset}:{name}?  ",
+          format: "mkv"
+        },
         transforms: {
           brightness: 500,
           contrast: -500,
@@ -98,7 +109,17 @@ describe("renderer state persistence", () => {
           sharpness: 999,
           volume: -20,
           scalePercent: 999,
+          cropPercent: 999,
           rotateDegrees: 45,
+          customRotateDegrees: -999,
+          textWatermark: "  Brand  ",
+          logoWatermarkPath: "  C:/brand/logo.png  ",
+          watermarkPosition: "top-right",
+          replaceAudioPath: "  C:/audio/track.mp3  ",
+          pitchSemitones: 99,
+          speedPercent: 5,
+          fadeInSeconds: 99,
+          fadeOutSeconds: -2,
           mirrorHorizontal: true
         }
       })
@@ -108,18 +129,33 @@ describe("renderer state persistence", () => {
       defaultPresetId: defaultPreferences.defaultPresetId,
       outputDir: "C:/Output",
       maxWorkers: 4,
+      outputNaming: {
+        template: "{preset}:{name}?",
+        format: "mkv"
+      },
       transforms: {
         mirrorHorizontal: true,
         mirrorVertical: undefined,
         removeAudio: undefined,
         rotateDegrees: undefined,
+        customRotateDegrees: -180,
         scalePercent: 200,
+        cropPercent: 40,
         brightness: 50,
         contrast: -50,
         saturation: 0,
         sharpness: 100,
-        volume: 0
-      }
+        textWatermark: "Brand",
+        logoWatermarkPath: "C:/brand/logo.png",
+        watermarkPosition: "top-right",
+        replaceAudioPath: "C:/audio/track.mp3",
+        volume: 0,
+        pitchSemitones: 12,
+        speedPercent: 50,
+        fadeInSeconds: 10,
+        fadeOutSeconds: 0
+      },
+      autoOpenOutput: false
     });
   });
 
@@ -129,11 +165,23 @@ describe("renderer state persistence", () => {
         selectedPresetId: "facebook-reel",
         outputDir: "",
         maxWorkers: 2,
+        outputNaming: {
+          template: "",
+          format: "bad"
+        },
         transforms: {}
       })
     });
 
     expect(loadPreferences(storage).defaultPresetId).toBe("facebook-reel");
+  });
+
+  it("preserves the auto-open-output preference and coerces non-booleans to false", () => {
+    const on = memoryStorage({ [preferencesStorageKey]: JSON.stringify({ ...defaultPreferences, autoOpenOutput: true }) });
+    expect(loadPreferences(on).autoOpenOutput).toBe(true);
+
+    const coerced = memoryStorage({ [preferencesStorageKey]: JSON.stringify({ autoOpenOutput: "yes" }) });
+    expect(loadPreferences(coerced).autoOpenOutput).toBe(false);
   });
 
   it("saves preferences and keeps history to the newest fifty entries", () => {
@@ -142,7 +190,12 @@ describe("renderer state persistence", () => {
       defaultPresetId: "tiktok",
       outputDir: "C:/Output",
       maxWorkers: 3,
-      transforms: { volume: 80 }
+      outputNaming: {
+        template: "{name}_{preset}",
+        format: "mov"
+      },
+      transforms: { volume: 80 },
+      autoOpenOutput: true
     };
     const history: HistoryItem[] = Array.from({ length: 55 }, (_, index) => ({
       id: String(index),
@@ -157,6 +210,55 @@ describe("renderer state persistence", () => {
     expect(JSON.parse(storage.read(preferencesStorageKey)!)).toEqual(preferences);
     expect(loadHistory(storage)).toHaveLength(50);
     expect(JSON.parse(storage.read(historyStorageKey)!)).toHaveLength(50);
+  });
+
+  it("loads and saves sanitized custom presets", () => {
+    const storage = memoryStorage({
+      [customPresetsStorageKey]: JSON.stringify([
+        {
+          id: " custom-one ",
+          name: " Custom One ",
+          settings: {
+            width: 1280,
+            height: 720,
+            fps: 30,
+            videoBitrate: "6M",
+            audioBitrate: "160k",
+            codec: "libx264",
+            maxDurationSeconds: 120,
+            normalizeAudio: true
+          }
+        },
+        {
+          id: "bad",
+          name: "Bad",
+          settings: { width: 0, height: 0, fps: 0, videoBitrate: "wat", audioBitrate: "wat", codec: "bad" }
+        }
+      ])
+    });
+
+    expect(loadCustomPresets(storage)).toEqual([
+      {
+        id: "custom-one",
+        name: "Custom One",
+        custom: true,
+        settings: {
+          width: 1280,
+          height: 720,
+          fps: 30,
+          videoBitrate: "6M",
+          audioBitrate: "160k",
+          codec: "libx264",
+          maxDurationSeconds: 120,
+          normalizeAudio: true,
+          crf: undefined,
+          preset: undefined
+        }
+      }
+    ]);
+
+    saveCustomPresets(loadCustomPresets(storage), storage);
+    expect(JSON.parse(storage.read(customPresetsStorageKey)!)).toHaveLength(1);
   });
 
   it("preserves safe failure metadata and source details in History", () => {
@@ -228,6 +330,14 @@ describe("renderer state persistence", () => {
       stopDisabled: true
     });
 
+    expect(getProcessingActionState([queued], true, true)).toMatchObject({
+      schedulableCount: 1,
+      startDisabled: true,
+      pauseDisabled: false,
+      stopDisabled: true,
+      startReason: "Starting queued videos."
+    });
+
     const active: QueueItem = { ...queued, status: "processing", processingJobId: "job-1" };
     expect(getProcessingActionState([active], true, true)).toMatchObject({
       activeCount: 1,
@@ -236,6 +346,26 @@ describe("renderer state persistence", () => {
       stopDisabled: false,
       startReason: "The batch is running."
     });
+  });
+
+  it("summarizes worker pool slots within package limits", () => {
+    const queued: QueueItem = { id: "queued", path: "C:/queued.mp4", name: "queued.mp4", size: 10, progress: 0, status: "queued" };
+    const paused: QueueItem = { ...queued, id: "paused", status: "paused" };
+    const processing: QueueItem = { ...queued, id: "processing", status: "processing", processingJobId: "job-1" };
+    const starting: QueueItem = { ...queued, id: "starting", status: "starting", processingJobId: "job-2" };
+
+    expect(getWorkerPoolState([queued, paused, processing, starting], 8, 3)).toEqual({
+      activeCount: 2,
+      queuedCount: 2,
+      maxWorkers: 3,
+      workerLimit: 3,
+      availableSlots: 1,
+      saturated: false
+    });
+    expect(getWorkerPoolState([queued, processing, starting], 2, 4)).toEqual(expect.objectContaining({
+      availableSlots: 0,
+      saturated: true
+    }));
   });
 
   it("blocks Start for unavailable processing, invalid imports, and terminal queue items", () => {
@@ -310,22 +440,70 @@ describe("renderer state persistence", () => {
     expect(formatVideoFormat()).toBe("Unknown format");
   });
 
+  it("summarizes an import batch by total size and validation status", () => {
+    const items: QueueItem[] = [
+      { id: "a", name: "a.mp4", size: 1_000_000, progress: 0, status: "queued", metadataState: "ready" },
+      { id: "b", name: "b.mp4", size: 2_000_000, progress: 0, status: "queued", metadataState: "probing" },
+      { id: "c", name: "c.mp4", size: 3_000_000, progress: 0, status: "queued", metadataState: "unavailable" },
+      { id: "d", name: "d.mp4", size: 4_000_000, progress: 0, status: "queued" }
+    ];
+
+    expect(summarizeImport(items)).toEqual({
+      count: 4,
+      totalBytes: 10_000_000,
+      ready: 1,
+      checking: 2,
+      unreadable: 1
+    });
+
+    expect(summarizeImport([])).toEqual({ count: 0, totalBytes: 0, ready: 0, checking: 0, unreadable: 0 });
+  });
+
+  it("estimates the remaining queue time from overall progress and elapsed time", () => {
+    // 25% done in 60s implies ~180s remaining.
+    expect(estimateQueueEtaSeconds(25, 60_000)).toBe(180);
+    // 50% done in 30s implies ~30s remaining.
+    expect(estimateQueueEtaSeconds(50, 30_000)).toBe(30);
+    // No usable estimate before progress starts, once complete, or without elapsed time.
+    expect(estimateQueueEtaSeconds(0, 60_000)).toBeUndefined();
+    expect(estimateQueueEtaSeconds(100, 60_000)).toBeUndefined();
+    expect(estimateQueueEtaSeconds(40, 0)).toBeUndefined();
+  });
+
+  it("formats the ETA into a customer-readable countdown", () => {
+    expect(formatEta(undefined)).toBe("Estimating time remaining...");
+    expect(formatEta(0)).toBe("Almost done");
+    expect(formatEta(45)).toBe("~45s remaining");
+    expect(formatEta(150)).toBe("~2m 30s remaining");
+    expect(formatEta(3700)).toBe("~1h 01m remaining");
+  });
+
   it("copies saved defaults into independent current-batch settings", () => {
     const preferences: ProcessingPreferences = {
       defaultPresetId: "youtube-short",
       outputDir: "C:/Default Output",
       maxWorkers: 3,
-      transforms: {}
+      outputNaming: {
+        template: "{preset}_{name}",
+        format: "mkv"
+      },
+      transforms: {},
+      autoOpenOutput: false
     };
 
     const currentBatch = currentBatchSettingsFromPreferences(preferences, 2);
     preferences.outputDir = "C:/Changed Default";
     preferences.maxWorkers = 1;
+    preferences.outputNaming.template = "changed";
 
     expect(currentBatch).toEqual({
       presetId: "youtube-short",
       outputDir: "C:/Default Output",
-      maxWorkers: 2
+      maxWorkers: 2,
+      outputNaming: {
+        template: "{preset}_{name}",
+        format: "mkv"
+      }
     });
   });
 
@@ -336,14 +514,29 @@ describe("renderer state persistence", () => {
       defaultPresetId: "youtube-short",
       outputDir: "",
       maxWorkers: 1,
+      outputNaming: {
+        template: "{name}_{preset}_processed",
+        format: "mp4"
+      },
       transforms: {
         scalePercent: 100,
+        cropPercent: 0,
         brightness: 0,
         contrast: 0,
         saturation: 0,
         sharpness: 0,
+        customRotateDegrees: 0,
+        textWatermark: "",
+        logoWatermarkPath: "",
+        watermarkPosition: "bottom-right",
+        replaceAudioPath: "",
+        pitchSemitones: 0,
+        speedPercent: 100,
+        fadeInSeconds: 0,
+        fadeOutSeconds: 0,
         volume: 100
-      }
+      },
+      autoOpenOutput: false
     });
 
     restored.transforms.scalePercent = 150;
@@ -352,6 +545,7 @@ describe("renderer state persistence", () => {
 
   it("summarizes non-default transforms", () => {
     expect(summarizeTransforms({ mirrorHorizontal: true, rotateDegrees: 90, scalePercent: 125, volume: 80 })).toBe("mirror, 90 deg, scale 125%, volume");
+    expect(summarizeTransforms({ cropPercent: 10, textWatermark: "Brand", replaceAudioPath: "C:/audio/track.mp3", speedPercent: 125 })).toBe("crop 10%, text watermark, audio replaced, speed 125%");
     expect(summarizeTransforms({ brightness: 0, volume: 100 })).toBeUndefined();
   });
 

@@ -10,10 +10,18 @@ export type ProcessingFailure = {
   recovery: ProcessingRecovery;
 };
 
+export type HardwareAccelerationInfo = {
+  available: boolean;
+  encoders: Array<"h264_nvenc" | "h264_amf" | "h264_qsv">;
+  message: string;
+  technicalMessage?: string;
+};
+
 export type ProcessingAvailability = {
   available: boolean;
   message: string;
   technicalMessage?: string;
+  hardwareAcceleration?: HardwareAccelerationInfo;
   failure?: ProcessingFailure;
 };
 
