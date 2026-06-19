@@ -230,6 +230,6 @@ appears, it means a lane edited outside its domain: stop and fix the boundary vi
 - [x] All Lane B boxes `[x]`; `npm run ship` green in the backend worktree.
 - [x] Telemetry end-to-end verified (desktop POST → backend store → admin display).
 - [x] Both PRs reviewed; security review passed on B1–B5/B10/B11.
-- [ ] Both lanes merged to `integrate/parallel-features`, then to `main`.
+- [x] Both lanes merged to `integrate/parallel-features`, then to `main`.
 - [x] `docs/requirements.md` reconciled to reflect everything shipped.
-- [ ] Worktrees removed (`git worktree remove …`); branches deleted after merge.
+- [x] Worktrees removed (`git worktree remove …`); branches deleted after merge.

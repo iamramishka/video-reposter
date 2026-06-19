@@ -105,7 +105,7 @@ self-marking checkboxes live in **[docs/parallel-execution-plan.md](parallel-exe
 
 **Integration**
 
-- [ ] Both lanes pass `npm run ship`, reviewed (security review on B1–B5/B10/B11), merged to `integrate/parallel-features`, then to `main`
+- [x] Both lanes pass `npm run ship`, reviewed (security review on B1–B5/B10/B11), merged to `integrate/parallel-features`, then to `main`
 
 ## Key Decisions
 
