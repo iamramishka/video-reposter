@@ -1918,6 +1918,21 @@ progress {
   font-weight: 700;
 }
 
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  color: #334155;
+  font-weight: 700;
+}
+
+.settings-toggle input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
 .settings-control input,
 .settings-control select {
   height: 36px;

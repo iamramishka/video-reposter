@@ -60,6 +60,7 @@ export type ProcessingPreferences = {
   maxWorkers: number;
   outputNaming: Required<OutputNamingOptions>;
   transforms: TransformSettings;
+  autoOpenOutput: boolean;
 };
 
 export type CurrentBatchSettings = {
@@ -107,7 +108,8 @@ export const defaultPreferences: ProcessingPreferences = {
     template: defaultOutputNamingTemplate,
     format: "mp4"
   },
-  transforms: defaultTransforms
+  transforms: defaultTransforms,
+  autoOpenOutput: false
 };
 
 export const historyStorageKey = "video-reposter.processing-history";
@@ -409,7 +411,8 @@ export function loadPreferences(storage = getStorage()): ProcessingPreferences {
       outputDir: typeof parsed.outputDir === "string" ? parsed.outputDir : "",
       maxWorkers: clampWorkers(parsed.maxWorkers),
       outputNaming: sanitizeOutputNaming(parsed.outputNaming),
-      transforms: sanitizeTransforms(parsed.transforms)
+      transforms: sanitizeTransforms(parsed.transforms),
+      autoOpenOutput: typeof parsed.autoOpenOutput === "boolean" ? parsed.autoOpenOutput : false
     };
   } catch {
     return defaultPreferences;

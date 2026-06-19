@@ -151,7 +151,8 @@ describe("renderer state persistence", () => {
         speedPercent: 50,
         fadeInSeconds: 10,
         fadeOutSeconds: 0
-      }
+      },
+      autoOpenOutput: false
     });
   });
 
@@ -172,6 +173,14 @@ describe("renderer state persistence", () => {
     expect(loadPreferences(storage).defaultPresetId).toBe("facebook-reel");
   });
 
+  it("preserves the auto-open-output preference and coerces non-booleans to false", () => {
+    const on = memoryStorage({ [preferencesStorageKey]: JSON.stringify({ ...defaultPreferences, autoOpenOutput: true }) });
+    expect(loadPreferences(on).autoOpenOutput).toBe(true);
+
+    const coerced = memoryStorage({ [preferencesStorageKey]: JSON.stringify({ autoOpenOutput: "yes" }) });
+    expect(loadPreferences(coerced).autoOpenOutput).toBe(false);
+  });
+
   it("saves preferences and keeps history to the newest fifty entries", () => {
     const storage = memoryStorage();
     const preferences: ProcessingPreferences = {
@@ -182,7 +191,8 @@ describe("renderer state persistence", () => {
         template: "{name}_{preset}",
         format: "mov"
       },
-      transforms: { volume: 80 }
+      transforms: { volume: 80 },
+      autoOpenOutput: true
     };
     const history: HistoryItem[] = Array.from({ length: 55 }, (_, index) => ({
       id: String(index),
@@ -425,7 +435,8 @@ describe("renderer state persistence", () => {
         template: "{preset}_{name}",
         format: "mkv"
       },
-      transforms: {}
+      transforms: {},
+      autoOpenOutput: false
     };
 
     const currentBatch = currentBatchSettingsFromPreferences(preferences, 2);
@@ -472,7 +483,8 @@ describe("renderer state persistence", () => {
         fadeInSeconds: 0,
         fadeOutSeconds: 0,
         volume: 100
-      }
+      },
+      autoOpenOutput: false
     });
 
     restored.transforms.scalePercent = 150;

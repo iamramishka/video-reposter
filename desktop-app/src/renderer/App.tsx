@@ -297,6 +297,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   const videoPickerRef = useRef<HTMLInputElement | null>(null);
   const folderPickerRef = useRef<HTMLInputElement | null>(null);
   const historyIds = useRef(new Set(history.map((item) => item.id)));
+  const autoOpenOutputRef = useRef(preferences.autoOpenOutput);
   const totals = useMemo(() => getQueueTotals(items), [items]);
   const etaSeconds = running && batchStartedAt !== null ? estimateQueueEtaSeconds(totals.overall, now - batchStartedAt) : undefined;
   const packageLimits = useMemo(() => packageLimitsForLicense(license), [license]);
@@ -371,6 +372,10 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   }, [preferences]);
 
   useEffect(() => {
+    autoOpenOutputRef.current = preferences.autoOpenOutput;
+  }, [preferences.autoOpenOutput]);
+
+  useEffect(() => {
     saveQueue(items);
   }, [items]);
 
@@ -431,6 +436,13 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     if (items.length > 0 && activeCount === 0 && items.every((item) => item.status === "complete" || item.status === "failed")) {
       setRunning(false);
       appendLog(setLogs, "Batch complete.");
+      if (autoOpenOutputRef.current) {
+        const firstOutput = items.find((item) => item.status === "complete" && item.outputPath)?.outputPath;
+        if (firstOutput) {
+          void videoReposterBridge.showItemInFolder(firstOutput);
+          appendLog(setLogs, "Opened the output folder for the completed batch.");
+        }
+      }
     }
   }, [items, running, currentBatchMaxWorkers]);
 
@@ -579,6 +591,11 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
 
   function updateDefaultOutputNaming(next: Partial<OutputNamingOptions>) {
     setPreferences((current) => ({ ...current, outputNaming: { ...current.outputNaming, ...next } }));
+  }
+
+  function updateAutoOpenOutput(value: boolean) {
+    setPreferences((current) => ({ ...current, autoOpenOutput: value }));
+    appendLog(setLogs, value ? "Output folder will open automatically when a batch finishes." : "Automatic output folder opening turned off.");
   }
 
   function updateCurrentBatchOutputNaming(next: Partial<OutputNamingOptions>) {
@@ -1119,6 +1136,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
         defaultOutputDir={preferences.outputDir}
         defaultOutputNaming={preferences.outputNaming}
         defaultMaxWorkers={preferences.maxWorkers}
+        autoOpenOutput={preferences.autoOpenOutput}
         workerLimit={packageLimits.worker_limit}
         restoreDefaultPresetName={
           visiblePresets.find((preset) => preset.id === defaultPreferences.defaultPresetId)?.name
@@ -1132,6 +1150,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
         onChooseDefaultOutputFolder={chooseDefaultOutputFolder}
         onDefaultOutputNamingChange={updateDefaultOutputNaming}
         onDefaultMaxWorkersChange={updateDefaultMaxWorkers}
+        onAutoOpenOutputChange={updateAutoOpenOutput}
         onRestoreDefaultSettings={restoreDefaultSettings}
         onOpenLog={() => videoReposterBridge.openProcessingLog()}
       />
@@ -1534,6 +1553,7 @@ function SettingsPanel({
   defaultOutputDir,
   defaultOutputNaming,
   defaultMaxWorkers,
+  autoOpenOutput,
   workerLimit,
   restoreDefaultPresetName,
   state,
@@ -1543,12 +1563,14 @@ function SettingsPanel({
   onChooseDefaultOutputFolder,
   onDefaultOutputNamingChange,
   onDefaultMaxWorkersChange,
+  onAutoOpenOutputChange,
   onRestoreDefaultSettings,
   onOpenLog
 }: {
   defaultOutputDir: string;
   defaultOutputNaming: Required<OutputNamingOptions>;
   defaultMaxWorkers: number;
+  autoOpenOutput: boolean;
   workerLimit: number;
   restoreDefaultPresetName: string;
   state: LicenseState;
@@ -1558,6 +1580,7 @@ function SettingsPanel({
   onChooseDefaultOutputFolder: () => void;
   onDefaultOutputNamingChange: (value: Partial<OutputNamingOptions>) => void;
   onDefaultMaxWorkersChange: (value: number) => void;
+  onAutoOpenOutputChange: (value: boolean) => void;
   onRestoreDefaultSettings: () => void;
   onOpenLog: () => void;
 }) {
@@ -1628,6 +1651,10 @@ function SettingsPanel({
             <option value="mkv">MKV</option>
             <option value="mov">MOV</option>
           </select>
+        </label>
+        <label className="settings-toggle">
+          <input type="checkbox" checked={autoOpenOutput} onChange={(event) => onAutoOpenOutputChange(event.target.checked)} />
+          <span>Open the output folder automatically when a batch finishes</span>
         </label>
         </section>
         <section className="panel settings-card">
