@@ -1083,6 +1083,16 @@ select:focus-visible {
   font-weight: 600;
 }
 
+.queue-eta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .queue-level-actions,
 .queue-item-actions {
   display: flex;

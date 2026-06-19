@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  Clock,
   Cloud,
   Copy,
   Film,
@@ -41,9 +42,11 @@ import {
   canRetryHistoryItem,
   defaultPreferences,
   defaultTransforms,
+  estimateQueueEtaSeconds,
   filterHistoryItems,
   formatBytes,
   formatDuration,
+  formatEta,
   formatHistoryDate,
   formatVideoFormat,
   getFinishedQueueItems,
@@ -278,6 +281,8 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   const [activeView, setActiveView] = useState<ViewKey>("dashboard");
   const [items, setItems] = useState<QueueItem[]>(loadQueue);
   const [running, setRunning] = useState(false);
+  const [batchStartedAt, setBatchStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [logs, setLogs] = useState<string[]>(["Ready for video import."]);
   const [importStatus, setImportStatus] = useState("");
   const [presets, setPresets] = useState<PlatformPreset[]>(platformPresets);
@@ -292,6 +297,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   const folderPickerRef = useRef<HTMLInputElement | null>(null);
   const historyIds = useRef(new Set(history.map((item) => item.id)));
   const totals = useMemo(() => getQueueTotals(items), [items]);
+  const etaSeconds = running && batchStartedAt !== null ? estimateQueueEtaSeconds(totals.overall, now - batchStartedAt) : undefined;
   const packageLimits = useMemo(() => packageLimitsForLicense(license), [license]);
   const visiblePresets = useMemo(() => presets.slice(0, packageLimits.template_limit), [packageLimits.template_limit, presets]);
   const defaultPresetId = preferences.defaultPresetId;
@@ -366,6 +372,17 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
   useEffect(() => {
     saveQueue(items);
   }, [items]);
+
+  useEffect(() => {
+    if (!running) {
+      setBatchStartedAt(null);
+      return undefined;
+    }
+    setBatchStartedAt((current) => current ?? Date.now());
+    setNow(Date.now());
+    const ticker = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(ticker);
+  }, [running]);
 
   useEffect(() => {
     const item = items.find((next) => next.path && !next.metadataState);
@@ -777,7 +794,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
       <div className="stats-grid">
         <Stat label="Total Videos" value={String(items.length)} meta={formatBytes(totals.bytes)} />
         <Stat label="Completed" value={String(totals.complete)} meta={`${totals.overall}% overall`} />
-        <Stat label="Processing" value={String(totals.processing)} meta={running ? "Workers active" : "Workers idle"} />
+        <Stat label="Processing" value={String(totals.processing)} meta={running ? (etaSeconds !== undefined ? formatEta(etaSeconds) : "Workers active") : "Workers idle"} />
         <Stat label="Failed" value={String(totals.failed)} meta="Needs review" />
       </div>
     );
@@ -913,6 +930,11 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
             <div>
               <h2>Processing Queue</h2>
               <p>{items.length ? `${items.length} item${items.length === 1 ? "" : "s"} in the current queue.` : "No items in the current queue."}</p>
+              {running && (
+                <p className="queue-eta" role="status" aria-live="polite">
+                  <Clock size={15} /> {formatEta(etaSeconds)}
+                </p>
+              )}
             </div>
             <div className="queue-level-actions">
               <button className="solid" onClick={startBatch} disabled={processingActions.startDisabled}><Play size={17} /> {startLabel}</button>

@@ -128,7 +128,7 @@ it green. Then push and open a PR per Section 7.
 | A3 | Output folder picker polish | 1.4 | [ ] |
 | A4 | Quality presets (low/medium/high → encoder settings) | 1.4 | [ ] |
 | A5 | Custom resolution UI | 1.4 | [ ] |
-| A6 | Overall ETA across the processing queue | 1.5 | [ ] |
+| A6 | Overall ETA across the processing queue | 1.5 | [x] |
 | A7 | Auto-open output folder option | 1.5 | [ ] |
 | A8 | Fully custom platform preset editor | 1.6 | [ ] |
 | A9 | Richer device-conflict recovery UX | 1.1 | [ ] |

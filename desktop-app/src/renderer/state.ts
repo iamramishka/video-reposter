@@ -318,6 +318,25 @@ export function formatDuration(seconds?: number) {
   return `${minutes}:${String(rounded % 60).padStart(2, "0")}`;
 }
 
+export function estimateQueueEtaSeconds(overallProgress: number, elapsedMs: number): number | undefined {
+  if (!Number.isFinite(overallProgress) || !Number.isFinite(elapsedMs)) return undefined;
+  if (overallProgress <= 0 || overallProgress >= 100 || elapsedMs <= 0) return undefined;
+  const fraction = overallProgress / 100;
+  const remainingMs = elapsedMs / fraction - elapsedMs;
+  return Math.max(0, Math.round(remainingMs / 1000));
+}
+
+export function formatEta(seconds?: number) {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return "Estimating time remaining...";
+  if (seconds < 1) return "Almost done";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.round(seconds % 60);
+  if (hours > 0) return `~${hours}h ${String(minutes).padStart(2, "0")}m remaining`;
+  if (minutes > 0) return `~${minutes}m ${String(secs).padStart(2, "0")}s remaining`;
+  return `~${secs}s remaining`;
+}
+
 export function formatVideoFormat(path?: string, codec?: string) {
   const extension = path?.split(".").pop()?.toUpperCase();
   return [extension, codec?.toUpperCase()].filter(Boolean).join(" · ") || "Unknown format";

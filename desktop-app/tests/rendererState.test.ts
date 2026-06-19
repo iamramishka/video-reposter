@@ -5,8 +5,10 @@ import {
   buildQueueItemsFromImports,
   canRetryHistoryItem,
   currentBatchSettingsFromPreferences,
+  estimateQueueEtaSeconds,
   filterHistoryItems,
   formatDuration,
+  formatEta,
   formatVideoFormat,
   getFinishedQueueItems,
   getNewBatchItems,
@@ -373,6 +375,25 @@ describe("renderer state persistence", () => {
     expect(formatDuration()).toBe("Unknown duration");
     expect(formatVideoFormat("C:/videos/clip.mp4", "h264")).toBe("MP4 · H264");
     expect(formatVideoFormat()).toBe("Unknown format");
+  });
+
+  it("estimates the remaining queue time from overall progress and elapsed time", () => {
+    // 25% done in 60s implies ~180s remaining.
+    expect(estimateQueueEtaSeconds(25, 60_000)).toBe(180);
+    // 50% done in 30s implies ~30s remaining.
+    expect(estimateQueueEtaSeconds(50, 30_000)).toBe(30);
+    // No usable estimate before progress starts, once complete, or without elapsed time.
+    expect(estimateQueueEtaSeconds(0, 60_000)).toBeUndefined();
+    expect(estimateQueueEtaSeconds(100, 60_000)).toBeUndefined();
+    expect(estimateQueueEtaSeconds(40, 0)).toBeUndefined();
+  });
+
+  it("formats the ETA into a customer-readable countdown", () => {
+    expect(formatEta(undefined)).toBe("Estimating time remaining...");
+    expect(formatEta(0)).toBe("Almost done");
+    expect(formatEta(45)).toBe("~45s remaining");
+    expect(formatEta(150)).toBe("~2m 30s remaining");
+    expect(formatEta(3700)).toBe("~1h 01m remaining");
   });
 
   it("copies saved defaults into independent current-batch settings", () => {
