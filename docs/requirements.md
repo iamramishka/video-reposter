@@ -17,8 +17,8 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Store license cache encrypted locally
 - [x] Support expiry dates and revoked status
 - [x] Provide offline grace handling in license cache logic
-- [ ] Send expiry reminder emails at 30, 14, 7, and 1 days before expiry
-- [ ] Add richer device conflict recovery UX
+- [x] Send expiry reminder emails at 30, 14, 7, and 1 days before expiry
+- [x] Add richer device conflict recovery UX
 
 ### 1.2 Video Input
 
@@ -26,8 +26,8 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Duplicate detection by filename and size in renderer state helpers
 - [x] FFprobe metadata validation
 - [x] Full folder import UI with recursive native/local-worker folder scanning
-- [ ] Drag-and-drop polish across all supported views
-- [ ] Import summary with total size and validation status
+- [x] Drag-and-drop polish across all supported views
+- [x] Import summary with total size and validation status
 
 ### 1.3 Video Processing
 
@@ -51,11 +51,11 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 
 - [x] Output path support in processing jobs
 - [x] Codec, bitrate, resolution, FPS, and audio bitrate settings in shared types
-- [ ] Output folder picker polish
+- [x] Output folder picker polish
 - [x] Custom file naming template
 - [x] Optional MKV and MOV output
-- [ ] Quality presets
-- [ ] Custom resolution UI
+- [x] Quality presets
+- [x] Custom resolution UI
 
 ### 1.5 Controls And Logs
 
@@ -65,8 +65,8 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Timestamped processing logs
 - [x] Queue/history state helpers
 - [x] Pause/resume safe checkpoints
-- [ ] Overall ETA
-- [ ] Auto-open output folder option
+- [x] Overall ETA
+- [x] Auto-open output folder option
 
 ### 1.6 Platform Presets
 
@@ -75,7 +75,7 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] TikTok
 - [x] Twitter/X
 - [x] Facebook Reel
-- [ ] Fully custom preset editor
+- [x] Fully custom preset editor
 
 ## 2. Admin Dashboard
 
@@ -84,15 +84,15 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Admin login with JWT
 - [x] Role-aware UI write restrictions
 - [x] Account password change UI
-- [ ] Configurable session timeout UX
-- [ ] Dedicated login audit view
+- [x] Configurable session timeout UX
+- [x] Dedicated login audit view
 
 ### 2.2 Users
 
 - [x] Customer list grouped from license records
 - [x] Search and CSV export
-- [ ] Full create/edit/disable/delete user CRUD separate from license creation
-- [ ] Soft-delete and retention policy
+- [x] Full create/edit/disable/delete user CRUD separate from license creation
+- [x] Soft-delete and retention policy
 
 ### 2.3 Licenses
 
@@ -110,8 +110,8 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Total, active, pending, expired, revoked, activations, expiring soon, and plan split
 - [x] CSV exports for licenses and users
 - [x] Daily activation chart
-- [ ] Processing statistics from desktop history
-- [ ] Top error codes
+- [x] Processing statistics from desktop history
+- [x] Top error codes
 - [x] PDF export
 
 ### 2.5 Optional Payments
@@ -119,7 +119,7 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Select Stripe or Paddle
 - [x] Payment history
 - [x] Invoice downloads
-- [ ] MRR/ARR/churn dashboard (MRR/ARR/subscribers shipped; churn metric pending)
+- [x] MRR/ARR/churn dashboard
 - [x] Webhook-driven license renewal
 
 ## 3. Backend API
@@ -141,7 +141,7 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Analytics summary
 - [x] Audit logs
 - [x] PDF report endpoint
-- [ ] CSV report endpoint separate from admin client-side export
+- [x] CSV report endpoint separate from admin client-side export
 
 ### 3.3 Security
 
@@ -151,8 +151,8 @@ Video Reposter is a Windows desktop batch video processor with online license ac
 - [x] Request validation with Zod
 - [x] Audit logging for license/admin actions
 - [x] Production guard against default JWT secret
-- [ ] HTTPS enforcement at deployment edge
-- [ ] Timing-safe license key comparison review
+- [x] HTTPS enforcement at deployment edge
+- [x] Timing-safe license key comparison review
 
 ## 4. Non-Functional Targets
 
