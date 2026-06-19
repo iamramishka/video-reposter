@@ -1744,20 +1744,35 @@ function PresetGallery({
 }
 
 function DeviceConflictHelp({ device, licenseKey, onContact }: { device: DeviceInfo; licenseKey: string; onContact: () => void }) {
+  const hasKey = isLicenseKey(licenseKey);
+  const supportMessage = [
+    "Hi, I need to reset the device binding for my Video Reposter license.",
+    "",
+    `License key: ${hasKey ? licenseKey : "(enter key above first)"}`,
+    `Device name: ${device.deviceName}`,
+    `Device ID:   ${device.deviceId.slice(0, 24).toUpperCase()}`,
+    "",
+    "Please reset the device binding so I can activate on this computer. Thank you."
+  ].join("\n");
+
   return (
     <section className="device-conflict-panel" aria-label="Device conflict recovery">
       <div>
         <AlertTriangle size={20} />
         <strong>License already active on another device</strong>
       </div>
-      <p>Ask support to reset the device binding, then activate again on this computer.</p>
+      <ol className="device-conflict-steps">
+        <li>If you still have access to the old device, uninstall Video Reposter there first.</li>
+        <li>Copy the support message below and send it to the support team.</li>
+        <li>Once support resets the binding, click <strong>Activate License</strong> above.</li>
+      </ol>
       <dl>
-        <div><dt>This device</dt><dd>{device.deviceName}</dd></div>
+        <div><dt>This device</dt><dd title={device.deviceName}>{device.deviceName}</dd></div>
         <div><dt>Device ID</dt><dd>{device.deviceId.slice(0, 24).toUpperCase()}</dd></div>
-        <div><dt>License</dt><dd>{isLicenseKey(licenseKey) ? licenseKey : "Enter the license key before contacting support"}</dd></div>
+        <div><dt>License</dt><dd>{hasKey ? licenseKey : <em>Enter the key above</em>}</dd></div>
       </dl>
       <div className="device-conflict-actions">
-        <button onClick={() => void copyText(`${device.deviceName} ${device.deviceId}`)}><Copy size={16} /> Copy Device Info</button>
+        <button onClick={() => void copyText(supportMessage)} title="Copy a pre-filled support message to your clipboard"><Copy size={16} /> Copy Support Message</button>
         <button onClick={onContact}><ShoppingCart size={16} /> Contact Support</button>
       </div>
     </section>

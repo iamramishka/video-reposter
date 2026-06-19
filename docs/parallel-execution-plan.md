@@ -131,7 +131,7 @@ it green. Then push and open a PR per Section 7.
 | A6 | Overall ETA across the processing queue | 1.5 | [x] |
 | A7 | Auto-open output folder option | 1.5 | [x] |
 | A8 | Fully custom platform preset editor | 1.6 | [x] |
-| A9 | Richer device-conflict recovery UX | 1.1 | [ ] |
+| A9 | Richer device-conflict recovery UX | 1.1 | [x] |
 | A10 | **Telemetry (desktop half):** POST each finished job's stats to the backend per Section 6 | 2.4 | [ ] |
 
 ### Lane B — Codex · `backend/**` + `admin-dashboard/**` · branch `feat/backend-admin-enhancements`
