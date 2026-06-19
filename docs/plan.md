@@ -95,13 +95,13 @@ self-marking checkboxes live in **[docs/parallel-execution-plan.md](parallel-exe
 
 **Lane B — Codex** · `backend/**` + `admin-dashboard/**` · branch `feat/backend-admin-enhancements`
 
-- [ ] B1 scheduled expiry-reminder emails (30/14/7/1 days)
-- [ ] B2 configurable session-timeout UX
-- [ ] B3 dedicated login audit view
-- [ ] B4 full user CRUD; B5 soft-delete + retention policy
-- [ ] B6 telemetry ingest + admin processing-statistics view; B7 top error codes
-- [ ] B8 churn metric; B9 server-side CSV report endpoint
-- [ ] B10 HTTPS enforcement at edge; B11 timing-safe license-key comparison
+- [x] B1 scheduled expiry-reminder emails (30/14/7/1 days)
+- [x] B2 configurable session-timeout UX
+- [x] B3 dedicated login audit view
+- [x] B4 full user CRUD; B5 soft-delete + retention policy
+- [x] B6 telemetry ingest + admin processing-statistics view; B7 top error codes
+- [x] B8 churn metric; B9 server-side CSV report endpoint
+- [x] B10 HTTPS enforcement at edge; B11 timing-safe license-key comparison
 
 **Integration**
 

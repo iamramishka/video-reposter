@@ -1,6 +1,15 @@
 import nodemailer from "nodemailer";
 import type { LicenseRecord } from "../types.js";
 
+export interface LicenseEmailService {
+  isConfigured(): boolean;
+  sendLicenseCreated(record: LicenseRecord): void;
+  sendLicenseActivated(record: LicenseRecord): void;
+  sendLicenseRevoked(record: LicenseRecord): void;
+  sendLicenseRenewed(record: LicenseRecord): void;
+  sendLicenseExpiryReminder(record: LicenseRecord, daysRemaining: number): void;
+}
+
 function smtpConfig() {
   return {
     host: process.env.SMTP_HOST,
@@ -20,7 +29,7 @@ ${lines.map(l => `<p style="margin:8px 0">${l}</p>`).join("")}
 </body></html>`;
 }
 
-export class EmailService {
+export class EmailService implements LicenseEmailService {
   private configured: boolean;
   private transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
   private from: string;
@@ -105,6 +114,23 @@ export class EmailService {
         `Hi ${name},`,
         `Your license <strong>${record.key}</strong> has been extended.`,
         `<strong>New expiry:</strong> ${expiresAt}`
+      ])
+    );
+  }
+
+  sendLicenseExpiryReminder(record: LicenseRecord, daysRemaining: number) {
+    if (!record.user?.email) return;
+    const name = record.user.name ?? "Customer";
+    const expiresAt = record.expiresAt.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    const dayLabel = daysRemaining === 1 ? "1 day" : `${daysRemaining} days`;
+    this.send(
+      record.user.email,
+      `Your Video Reposter license expires in ${dayLabel}`,
+      html("License expiring soon", [
+        `Hi ${name},`,
+        `Your <strong>${record.plan}</strong> license <strong>${record.key}</strong> expires in <strong>${dayLabel}</strong>.`,
+        `<strong>Expiry date:</strong> ${expiresAt}`,
+        "Renew before the expiry date to keep Video Reposter active on your device."
       ])
     );
   }

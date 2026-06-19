@@ -23,7 +23,7 @@ function mockStripe(overrides: Partial<StripeService> = {}): StripeService {
     createCheckoutSession: vi.fn(async () => ({ url: "https://checkout.stripe.com/test" })),
     createPortalSession: vi.fn(async () => ({ url: "https://billing.stripe.com/test" })),
     listInvoices: vi.fn(async () => []),
-    getPaymentSummary: vi.fn(async () => ({ mrr: 299, arr: 3588, activeSubscriptions: 3, currency: "usd" })),
+    getPaymentSummary: vi.fn(async () => ({ mrr: 299, arr: 3588, activeSubscriptions: 3, churnRate: 25, churnedSubscriptions: 1, currency: "usd" })),
     constructWebhookEvent: vi.fn()
   };
   return Object.assign(Object.create(StripeService.prototype) as StripeService, base, overrides);
@@ -53,6 +53,8 @@ describe("payments API", () => {
         expect(body.mrr).toBe(299);
         expect(body.arr).toBe(3588);
         expect(body.activeSubscriptions).toBe(3);
+        expect(body.churnRate).toBe(25);
+        expect(body.churnedSubscriptions).toBe(1);
       });
   });
 

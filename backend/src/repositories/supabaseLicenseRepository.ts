@@ -6,6 +6,9 @@ type UserRow = {
   name: string;
   email: string;
   company: string | null;
+  disabledAt: string | null;
+  deletedAt: string | null;
+  retentionUntil: string | null;
 };
 
 type LicenseRow = {
@@ -20,6 +23,8 @@ type LicenseRow = {
   expiresAt: string;
   lastVerifiedAt: string | null;
   userId: string | null;
+  deletedAt: string | null;
+  retentionUntil: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -30,6 +35,7 @@ export class SupabaseLicenseRepository implements LicenseRepository {
   async list(): Promise<LicenseRecord[]> {
     const rows = await this.client.get<LicenseRow[]>("License", {
       select: "*",
+      deletedAt: "is.null",
       order: "createdAt.desc"
     });
     const users = await this.findUsers(rows.map((row) => row.userId).filter((id): id is string => Boolean(id)));
@@ -37,7 +43,7 @@ export class SupabaseLicenseRepository implements LicenseRepository {
   }
 
   async findByKey(key: string): Promise<LicenseRecord | null> {
-    const row = await this.client.getOne<LicenseRow>("License", { select: "*", key: `eq.${key}` });
+    const row = await this.client.getOne<LicenseRow>("License", { select: "*", key: `eq.${key}`, deletedAt: "is.null" });
     if (!row) return null;
     const user = row.userId ? await this.client.getOne<UserRow>("User", { select: "*", id: `eq.${row.userId}` }) : null;
     return toLicenseRecord(row, user ?? undefined);
@@ -87,6 +93,18 @@ export class SupabaseLicenseRepository implements LicenseRepository {
     return this.updateByKey(key, { status: "revoked" });
   }
 
+  softDelete(key: string, retentionUntil: Date): Promise<LicenseRecord> {
+    const now = new Date().toISOString();
+    return this.updateByKey(key, {
+      status: "revoked",
+      deviceId: null,
+      hostname: null,
+      os: null,
+      deletedAt: now,
+      retentionUntil: retentionUntil.toISOString()
+    });
+  }
+
   resetDevice(key: string): Promise<LicenseRecord> {
     return this.updateByKey(key, {
       deviceId: null,
@@ -109,7 +127,9 @@ export class SupabaseLicenseRepository implements LicenseRepository {
     return this.updateByKey(key, {
       plan: input.plan,
       expiresAt: input.expiresAt?.toISOString(),
-      userId: user?.id
+      userId: user?.id,
+      deletedAt: null,
+      retentionUntil: null
     });
   }
 
@@ -120,7 +140,7 @@ export class SupabaseLicenseRepository implements LicenseRepository {
   }
 
   private async upsertUser(input: { name: string; email: string; company?: string }) {
-    const existing = await this.client.getOne<UserRow>("User", { select: "*", email: `eq.${input.email}` });
+    const existing = await this.client.getOne<UserRow>("User", { select: "*", email: `eq.${input.email}`, deletedAt: "is.null" });
     if (existing) {
       return this.client.update<UserRow>("User", { email: `eq.${input.email}` }, {
         name: input.name,
@@ -132,6 +152,9 @@ export class SupabaseLicenseRepository implements LicenseRepository {
       name: input.name,
       email: input.email,
       company: input.company ?? null,
+      disabledAt: null,
+      deletedAt: null,
+      retentionUntil: null,
       createdAt: now,
       updatedAt: now
     });
@@ -160,7 +183,16 @@ function toLicenseRecord(row: LicenseRow, user?: UserRow): LicenseRecord {
     activatedAt: dateFromSupabase(row.activatedAt),
     expiresAt: dateFromSupabase(row.expiresAt) ?? new Date(row.expiresAt),
     lastVerifiedAt: dateFromSupabase(row.lastVerifiedAt),
-    user: user ? { name: user.name, email: user.email, company: user.company } : null,
+    user: user ? {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      company: user.company,
+      disabledAt: dateFromSupabase(user.disabledAt),
+      deletedAt: dateFromSupabase(user.deletedAt)
+    } : null,
+    deletedAt: dateFromSupabase(row.deletedAt),
+    retentionUntil: dateFromSupabase(row.retentionUntil),
     createdAt: dateFromSupabase(row.createdAt) ?? new Date(row.createdAt),
     updatedAt: dateFromSupabase(row.updatedAt) ?? new Date(row.updatedAt)
   };

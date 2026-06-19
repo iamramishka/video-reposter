@@ -1,6 +1,7 @@
 export type LicenseStatus = "pending" | "active" | "expired" | "revoked";
 export type LicensePlan = "starter" | "pro" | "enterprise";
 export type AdminRole = "super_admin" | "admin" | "read_only";
+export type ProcessingTelemetryStatus = "complete" | "failed";
 
 export interface PackageDefinition {
   plan: LicensePlan;
@@ -22,10 +23,27 @@ export interface LicenseRecord {
   expiresAt: Date;
   lastVerifiedAt: Date | null;
   user?: {
+    id?: string;
     name: string;
     email: string;
     company: string | null;
+    disabledAt?: Date | null;
+    deletedAt?: Date | null;
   } | null;
+  deletedAt?: Date | null;
+  retentionUntil?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface UserRecord {
+  id: string;
+  name: string;
+  email: string;
+  company: string | null;
+  disabledAt: Date | null;
+  deletedAt: Date | null;
+  retentionUntil: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +61,7 @@ export interface LicenseRepository {
   touchVerification(key: string): Promise<LicenseRecord>;
   renew(key: string, expiresAt: Date): Promise<LicenseRecord>;
   revoke(key: string): Promise<LicenseRecord>;
+  softDelete(key: string, retentionUntil: Date): Promise<LicenseRecord>;
   resetDevice(key: string): Promise<LicenseRecord>;
   updateDetails(
     key: string,
@@ -52,6 +71,41 @@ export interface LicenseRepository {
       user?: { name: string; email: string; company?: string };
     }
   ): Promise<LicenseRecord>;
+}
+
+export interface UserRepository {
+  listActive(): Promise<UserRecord[]>;
+  findById(id: string): Promise<UserRecord | null>;
+  findByEmail(email: string): Promise<UserRecord | null>;
+  create(input: { name: string; email: string; company?: string | null }): Promise<UserRecord>;
+  update(id: string, input: { name?: string; email?: string; company?: string | null }): Promise<UserRecord>;
+  setDisabled(id: string, disabled: boolean): Promise<UserRecord>;
+  softDelete(id: string, retentionUntil: Date): Promise<UserRecord>;
+}
+
+export interface ProcessingTelemetryRecord {
+  id: string;
+  jobId: string;
+  status: ProcessingTelemetryStatus;
+  preset: string;
+  elapsedMs: number;
+  throughputMbPerMin: number | null;
+  inputSizeBytes: number | null;
+  errorCode: string | null;
+  createdAt: Date;
+}
+
+export interface ProcessingTelemetryRepository {
+  create(input: {
+    jobId: string;
+    status: ProcessingTelemetryStatus;
+    preset: string;
+    elapsedMs: number;
+    throughputMbPerMin?: number | null;
+    inputSizeBytes?: number | null;
+    errorCode?: string | null;
+  }): Promise<ProcessingTelemetryRecord>;
+  listRecent(limit: number): Promise<ProcessingTelemetryRecord[]>;
 }
 
 export interface PackageRepository {

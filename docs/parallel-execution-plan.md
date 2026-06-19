@@ -138,17 +138,17 @@ it green. Then push and open a PR per Section 7.
 
 | # | Task | Source req | Status |
 |---|------|-----------|--------|
-| B1 | Scheduled expiry-reminder emails at 30/14/7/1 days before expiry | 1.1 | [ ] |
-| B2 | Configurable session-timeout UX (JWT exp + admin setting) | 2.1 | [ ] |
-| B3 | Dedicated login audit view (backend audit query + admin page) | 2.1 | [ ] |
-| B4 | Full user CRUD (create/edit/disable/delete) separate from license creation | 2.2 | [ ] |
-| B5 | Soft-delete + retention policy for users/licenses | 2.2 | [ ] |
-| B6 | **Telemetry (backend+admin half):** ingest endpoint + storage + admin "Processing statistics" view per Section 6 | 2.4 | [ ] |
-| B7 | Top error codes analytics (aggregate from telemetry) + admin display | 2.4 | [ ] |
-| B8 | Churn metric in payment summary dashboard | 2.5 | [ ] |
-| B9 | Server-side CSV report endpoint (separate from client-side export) | 3.2 | [ ] |
-| B10 | HTTPS enforcement at the deployment edge | 3.3 | [ ] |
-| B11 | Timing-safe license-key comparison review + fix | 3.3 | [ ] |
+| B1 | Scheduled expiry-reminder emails at 30/14/7/1 days before expiry | 1.1 | [x] |
+| B2 | Configurable session-timeout UX (JWT exp + admin setting) | 2.1 | [x] |
+| B3 | Dedicated login audit view (backend audit query + admin page) | 2.1 | [x] |
+| B4 | Full user CRUD (create/edit/disable/delete) separate from license creation | 2.2 | [x] |
+| B5 | Soft-delete + retention policy for users/licenses | 2.2 | [x] |
+| B6 | **Telemetry (backend+admin half):** ingest endpoint + storage + admin "Processing statistics" view per Section 6 | 2.4 | [x] |
+| B7 | Top error codes analytics (aggregate from telemetry) + admin display | 2.4 | [x] |
+| B8 | Churn metric in payment summary dashboard | 2.5 | [x] |
+| B9 | Server-side CSV report endpoint (separate from client-side export) | 3.2 | [x] |
+| B10 | HTTPS enforcement at the deployment edge | 3.3 | [x] |
+| B11 | Timing-safe license-key comparison review + fix | 3.3 | [x] |
 
 ---
 
@@ -227,7 +227,7 @@ appears, it means a lane edited outside its domain: stop and fix the boundary vi
 ## 8. Definition of Done (this parallel effort)
 
 - [ ] All Lane A boxes `[x]`; `npm run ship` green in the desktop worktree.
-- [ ] All Lane B boxes `[x]`; `npm run ship` green in the backend worktree.
+- [x] All Lane B boxes `[x]`; `npm run ship` green in the backend worktree.
 - [ ] Telemetry end-to-end verified (desktop POST → backend store → admin display).
 - [ ] Both PRs reviewed; security review passed on B1–B5/B10/B11.
 - [ ] Both lanes merged to `integrate/parallel-features`, then to `main`.

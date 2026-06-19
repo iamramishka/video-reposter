@@ -79,9 +79,11 @@ export class StripeService {
     return invoices.data;
   }
 
-  async getPaymentSummary(): Promise<{ mrr: number; arr: number; activeSubscriptions: number; currency: string }> {
+  async getPaymentSummary(): Promise<{ mrr: number; arr: number; activeSubscriptions: number; churnRate: number; churnedSubscriptions: number; currency: string }> {
     if (!this.client) throw new StripeNotConfiguredError();
     const subscriptions = await this.client.subscriptions.list({ status: "active", limit: 100, expand: ["data.items.data.price"] });
+    const since = Math.floor((Date.now() - 30 * 86_400_000) / 1000);
+    const canceled = await this.client.subscriptions.list({ status: "canceled", created: { gte: since }, limit: 100 });
     let mrrCents = 0;
     const currency = "usd";
     for (const sub of subscriptions.data) {
@@ -93,7 +95,16 @@ export class StripeService {
       }
     }
     const mrr = Math.round(mrrCents) / 100;
-    return { mrr, arr: Math.round(mrr * 12 * 100) / 100, activeSubscriptions: subscriptions.data.length, currency };
+    const denominator = subscriptions.data.length + canceled.data.length;
+    const churnRate = denominator > 0 ? Math.round((canceled.data.length / denominator) * 10_000) / 100 : 0;
+    return {
+      mrr,
+      arr: Math.round(mrr * 12 * 100) / 100,
+      activeSubscriptions: subscriptions.data.length,
+      churnRate,
+      churnedSubscriptions: canceled.data.length,
+      currency
+    };
   }
 
   constructWebhookEvent(rawBody: Buffer | string, signature: string): Stripe.Event {

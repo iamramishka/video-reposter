@@ -12,10 +12,16 @@ if (isProduction && corsOrigin === "*") {
   console.warn("[config] WARNING: CORS_ORIGIN is not set — all origins are allowed. Set CORS_ORIGIN to your admin dashboard URL in production.");
 }
 
+const adminSessionTimeoutMinutes = Number(process.env.ADMIN_SESSION_TIMEOUT_MINUTES ?? 480);
+if (!Number.isInteger(adminSessionTimeoutMinutes) || adminSessionTimeoutMinutes < 15 || adminSessionTimeoutMinutes > 1440) {
+  throw new Error("ADMIN_SESSION_TIMEOUT_MINUTES must be an integer between 15 and 1440.");
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 4000),
   jwtSecret,
   corsOrigin,
+  adminSessionTimeoutMinutes,
   supabaseUrl: process.env.SUPABASE_URL,
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY
 };
