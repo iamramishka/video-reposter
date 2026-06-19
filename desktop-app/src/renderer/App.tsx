@@ -28,7 +28,7 @@ import {
 import type { CachedLicense, DeviceInfo, LicenseState, PackageLimits } from "../shared/license";
 import { isLicenseKey, licenseRefreshDescription, licenseStateLabel, normalizeLicenseKey, packageLimitsForLicense } from "../shared/license";
 import { productName, productTagline } from "../shared/branding";
-import { isSupportedVideoPath, platformPresets, qualityLevels } from "../shared/processing";
+import { buildOutputOverrides, isSupportedVideoPath, platformPresets, qualityLevels } from "../shared/processing";
 import type { ImportedVideoFile, OutputNamingOptions, OutputOverrides, PlatformPreset, QualityLevel, TransformSettings } from "../shared/processing";
 import { invalidVideoFailure, processingFailedFailure } from "../shared/processingFailure";
 import type { ProcessingAvailability, ProcessingFailure } from "../shared/processingFailure";
@@ -642,11 +642,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
     }
 
     setItems((current) => current.map((next) => (next.id === item.id ? { ...next, status: "starting", progress: 0, failure: undefined } : next)));
-    const outputOverrides: OutputOverrides = {
-      quality: currentBatchQuality,
-      width: Number(customResolution.width) || undefined,
-      height: Number(customResolution.height) || undefined
-    };
+    const outputOverrides = buildOutputOverrides(currentBatchQuality, customResolution.width, customResolution.height);
     let started: Awaited<ReturnType<typeof videoReposterBridge.startProcessingFile>>;
     try {
       started = await videoReposterBridge.startProcessingFile(item.path, currentBatchPresetId, currentBatchOutputDir || undefined, cleanTransforms(transforms), currentBatchOutputNaming, outputOverrides);
@@ -935,6 +931,34 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
             >
               {qualityLevels.map((level) => <option key={level} value={level}>{qualityLabel(level)}</option>)}
             </select>
+          </div>
+          <div className="resolution-inputs">
+            <label>Custom Resolution <small>(optional — leave blank to use preset)</small></label>
+            <div className="resolution-fields">
+              <input
+                id="new-batch-res-width"
+                type="number"
+                min={16}
+                max={7680}
+                step={2}
+                placeholder="Width px"
+                aria-label="Custom output width in pixels"
+                value={customResolution.width}
+                onChange={(event) => setCustomResolution((prev) => ({ ...prev, width: event.target.value }))}
+              />
+              <span aria-hidden="true">×</span>
+              <input
+                id="new-batch-res-height"
+                type="number"
+                min={16}
+                max={7680}
+                step={2}
+                placeholder="Height px"
+                aria-label="Custom output height in pixels"
+                value={customResolution.height}
+                onChange={(event) => setCustomResolution((prev) => ({ ...prev, height: event.target.value }))}
+              />
+            </div>
           </div>
           <div>
             <label htmlFor="new-batch-workers">Current Batch Workers</label>

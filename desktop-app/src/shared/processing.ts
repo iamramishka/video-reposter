@@ -122,6 +122,20 @@ export function normalizeDimension(value?: number): number | undefined {
   return rounded % 2 === 0 ? rounded : rounded + 1;
 }
 
+export function buildOutputOverrides(quality: QualityLevel, widthInput?: string, heightInput?: string): OutputOverrides {
+  return {
+    quality,
+    width: parsePositiveInt(widthInput),
+    height: parsePositiveInt(heightInput)
+  };
+}
+
+function parsePositiveInt(value?: string): number | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : undefined;
+}
+
 export function applyOutputOverrides(settings: OutputSettings, overrides?: OutputOverrides): OutputSettings {
   if (!overrides) return settings;
   let next: OutputSettings = { ...settings };

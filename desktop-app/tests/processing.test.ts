@@ -3,6 +3,7 @@ import {
   applyOutputOverrides,
   buildFfmpegArgs,
   buildFfmpegCommand,
+  buildOutputOverrides,
   isSupportedVideoPath,
   normalizeDimension,
   parseFfmpegProgress,
@@ -233,5 +234,27 @@ describe("output overrides", () => {
     expect(normalizeDimension(99999)).toBeUndefined();
     expect(normalizeDimension(undefined)).toBeUndefined();
     expect(normalizeDimension(Number.NaN)).toBeUndefined();
+  });
+
+  it("buildOutputOverrides parses string dimensions into numbers", () => {
+    expect(buildOutputOverrides("preset", "1280", "720")).toMatchObject({ quality: "preset", width: 1280, height: 720 });
+    expect(buildOutputOverrides("high", "1920", "1080")).toMatchObject({ quality: "high", width: 1920, height: 1080 });
+  });
+
+  it("buildOutputOverrides returns undefined dims for blank or invalid strings", () => {
+    const result = buildOutputOverrides("medium", "", "");
+    expect(result.width).toBeUndefined();
+    expect(result.height).toBeUndefined();
+  });
+
+  it("buildOutputOverrides returns undefined dims for non-numeric strings", () => {
+    const result = buildOutputOverrides("low", "abc", "xyz");
+    expect(result.width).toBeUndefined();
+    expect(result.height).toBeUndefined();
+  });
+
+  it("buildOutputOverrides returns undefined dims for negative or zero values", () => {
+    expect(buildOutputOverrides("preset", "-100", "0").width).toBeUndefined();
+    expect(buildOutputOverrides("preset", "-100", "0").height).toBeUndefined();
   });
 });
