@@ -963,6 +963,37 @@ select:focus-visible {
   gap: 4px;
 }
 
+.import-summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.import-summary-bar strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.import-summary-bar .import-summary-ok strong {
+  color: #16a34a;
+}
+
+.import-summary-bar .import-summary-checking strong {
+  color: #d97706;
+}
+
+.import-summary-bar .import-summary-bad strong {
+  color: #dc2626;
+}
+
 .batch-destination {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

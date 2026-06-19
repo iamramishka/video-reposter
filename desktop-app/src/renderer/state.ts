@@ -207,6 +207,28 @@ export function getQueueTotals(items: QueueItem[]) {
   };
 }
 
+export type ImportSummary = {
+  count: number;
+  totalBytes: number;
+  ready: number;
+  checking: number;
+  unreadable: number;
+};
+
+export function summarizeImport(items: QueueItem[]): ImportSummary {
+  return items.reduce<ImportSummary>(
+    (summary, item) => {
+      summary.count += 1;
+      summary.totalBytes += Number.isFinite(item.size) ? item.size : 0;
+      if (item.metadataState === "ready") summary.ready += 1;
+      else if (item.metadataState === "unavailable") summary.unreadable += 1;
+      else summary.checking += 1;
+      return summary;
+    },
+    { count: 0, totalBytes: 0, ready: 0, checking: 0, unreadable: 0 }
+  );
+}
+
 export function getProcessingActionState(
   items: QueueItem[],
   processingAvailable: boolean | null,

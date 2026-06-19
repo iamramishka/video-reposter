@@ -65,6 +65,7 @@ import {
   saveHistory,
   savePreferences,
   saveQueue,
+  summarizeImport,
   summarizeTransforms
 } from "./state";
 import type { HistoryFilter, HistoryItem, ImportSource, ProcessingPreferences, QueueFailure, QueueItem } from "./state";
@@ -811,6 +812,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
 
   function renderNewBatchPage() {
     const batchItems = getNewBatchItems(items);
+    const importSummary = summarizeImport(batchItems);
     if (isNewBatchLocked(items, running)) {
       return (
         <section className="panel batch-handoff">
@@ -840,6 +842,14 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
           {batchItems.length === 0 ? (
             <EmptyQueue />
           ) : (
+            <>
+            <div className="import-summary-bar" role="status" aria-live="polite">
+              <span><strong>{importSummary.count}</strong> video{importSummary.count === 1 ? "" : "s"}</span>
+              <span><strong>{formatBytes(importSummary.totalBytes)}</strong> total</span>
+              <span className="import-summary-ok"><strong>{importSummary.ready}</strong> validated</span>
+              {importSummary.checking > 0 && <span className="import-summary-checking"><strong>{importSummary.checking}</strong> checking</span>}
+              {importSummary.unreadable > 0 && <span className="import-summary-bad"><strong>{importSummary.unreadable}</strong> unreadable</span>}
+            </div>
             <div className="new-batch-video-list">
               {batchItems.map((item) => (
                 <QueueItemRow
@@ -852,6 +862,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
                 />
               ))}
             </div>
+            </>
           )}
         </section>
         <section className="panel batch-destination">

@@ -19,6 +19,7 @@ import {
   isNewBatchLocked,
   queueStatusLabel,
   restoredDefaultPreferences,
+  summarizeImport,
   historyStorageKey,
   loadHistory,
   loadPreferences,
@@ -375,6 +376,25 @@ describe("renderer state persistence", () => {
     expect(formatDuration()).toBe("Unknown duration");
     expect(formatVideoFormat("C:/videos/clip.mp4", "h264")).toBe("MP4 · H264");
     expect(formatVideoFormat()).toBe("Unknown format");
+  });
+
+  it("summarizes an import batch by total size and validation status", () => {
+    const items: QueueItem[] = [
+      { id: "a", name: "a.mp4", size: 1_000_000, progress: 0, status: "queued", metadataState: "ready" },
+      { id: "b", name: "b.mp4", size: 2_000_000, progress: 0, status: "queued", metadataState: "probing" },
+      { id: "c", name: "c.mp4", size: 3_000_000, progress: 0, status: "queued", metadataState: "unavailable" },
+      { id: "d", name: "d.mp4", size: 4_000_000, progress: 0, status: "queued" }
+    ];
+
+    expect(summarizeImport(items)).toEqual({
+      count: 4,
+      totalBytes: 10_000_000,
+      ready: 1,
+      checking: 2,
+      unreadable: 1
+    });
+
+    expect(summarizeImport([])).toEqual({ count: 0, totalBytes: 0, ready: 0, checking: 0, unreadable: 0 });
   });
 
   it("estimates the remaining queue time from overall progress and elapsed time", () => {
