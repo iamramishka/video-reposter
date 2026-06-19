@@ -160,73 +160,73 @@ Each phase is independently shippable and reversible. **Phase 0 and 1 are prereq
 phases can be reordered.
 
 ### Phase 0 — Safety net (do first)
-- [ ] Create branch `chore/claude-config-overhaul` (never work on `main`).
-- [ ] Confirm `npm test` and `npm run build` pass *before* any change (baseline green).
-- [ ] Snapshot current `.claude/` to `docs/decisions/0001-pre-overhaul-snapshot.md` for rollback.
+- [x] Create branch `chore/claude-config-overhaul` (never work on `main`).
+- [x] Confirm `npm test` and `npm run build` pass *before* any change (baseline green).
+- [x] Snapshot current `.claude/` to `docs/decisions/0001-pre-overhaul-snapshot.md` for rollback.
 
 **Acceptance:** baseline tests recorded; working tree clean on a feature branch.
 
 ### Phase 1 — Foundation: CLAUDE.md + settings.json + reconcile drift
-- [ ] Author root **`CLAUDE.md`** (concise): project identity, the 10-step task workflow,
+- [x] Author root **`CLAUDE.md`** (concise): project identity, the 10-step task workflow,
       coding rules, security checklist, worktree policy (Part C), skill/agent trigger pointers,
       and explicit "verify before you claim" comprehension/hallucination rules.
-- [ ] Rewrite **`.claude/settings.json`** to the real schema:
+- [x] Rewrite **`.claude/settings.json`** to the real schema:
       `model` (set to a valid current id), `permissions.allow` (read-only Bash, npm test/build,
       git status/diff), `permissions.ask`/`deny` (no `git push`/`rm -rf` without confirm),
       `hooks`, and `env`.
-- [ ] **Reconcile A.3 drift** in `docs/requirements.md`, `docs/plan.md` decisions table,
+- [x] **Reconcile A.3 drift** in `docs/requirements.md`, `docs/plan.md` decisions table,
       `README.md`, and `.claude/common-prompt.md`: Vite (not Next.js), `ffmpeg-static`
       (not fluent-ffmpeg), document Supabase, drop unused Tailwind/Shadcn/Zustand claims (or add
       them as explicit "planned, not yet installed").
-- [ ] Write **`docs/standards.md`**: coding standards, Definition of Done, branch naming
+- [x] Write **`docs/standards.md`**: coding standards, Definition of Done, branch naming
       (`feature/`, `fix/`, `hotfix/`, `chore/`), blast-radius rule, token-budget rule
       (Haiku for mechanical edits / Sonnet default / Opus for architecture).
-- [ ] Write **`docs/worktree-guide.md`** (Part C).
+- [x] Write **`docs/worktree-guide.md`** (Part C).
 
 **Acceptance:** `CLAUDE.md` loads and is accurate; `settings.json` validates; no doc claims a
 technology the code doesn't use; `npm test`/`build` still green.
 
 ### Phase 2 — Wire the agents
 Create real subagents in `.claude/agents/` with proper frontmatter and least-privilege tools:
-- [ ] `code-reviewer` — diff correctness + reuse/simplification (read-only tools).
-- [ ] `security-auditor` — license/crypto/JWT/secret/Zod-validation review (read-only).
-- [ ] `test-runner` — runs `npm test`, parses failures, reports with context.
-- [ ] `ui-verifier` — drives `preview_*` to verify desktop/admin UI against `Designs/*.png` + palette.
-- [ ] `dependency-auditor` — `npm audit`/outdated across all three workspaces.
+- [x] `code-reviewer` — diff correctness + reuse/simplification (read-only tools).
+- [x] `security-auditor` — license/crypto/JWT/secret/Zod-validation review (read-only).
+- [x] `test-runner` — runs `npm test`, parses failures, reports with context.
+- [x] `ui-verifier` — drives `preview_*` to verify desktop/admin UI against `Designs/*.png` + palette.
+- [x] `dependency-auditor` — `npm audit`/outdated across all three workspaces.
 
 **Acceptance:** each agent spawns, has only the tools it needs, and produces a structured report.
 
 ### Phase 3 — Author the skills (slash commands)
 Create `.claude/commands/`:
-- [ ] `ship` — orchestrates the pre-merge gate: build → test → security-auditor → code-reviewer →
+- [x] `ship` — orchestrates the pre-merge gate: build → test → security-auditor → code-reviewer →
       env-parity → changelog. Stops on first hard failure.
-- [ ] `audit-deps`, `env-parity`, `changelog`, `rollback-plan`, `skills-health-check`.
+- [x] `audit-deps`, `env-parity`, `changelog`, `rollback-plan`, `skills-health-check`.
 
 **Acceptance:** every command runs end-to-end on the current repo and emits a clear pass/fail.
 
 ### Phase 4 — Quality gates & hooks
-- [ ] `.claude/settings.json` hooks: PostToolUse on `Edit|Write` → type-check the touched workspace;
+- [x] `.claude/settings.json` hooks: PostToolUse on `Edit|Write` → type-check the touched workspace;
       PreToolUse matcher on `git commit` → run `pre-commit-guard.ps1` (lint + tsc + secret-scan).
-- [ ] Git-level **husky pre-commit** for enforcement independent of Claude (belt and suspenders).
-- [ ] `secret-scan.ps1` — entropy + keyword scan for committed secrets (respects `.gitignore`).
-- [ ] Add a **PR review checklist** template under `.github/` and document the merge-review flow.
+- [x] Git-level **husky pre-commit** for enforcement independent of Claude (belt and suspenders).
+- [x] `secret-scan.ps1` — entropy + keyword scan for committed secrets (respects `.gitignore`).
+- [x] Add a **PR review checklist** template under `.github/` and document the merge-review flow.
 
 **Acceptance:** a deliberately-introduced lint error / fake secret / type error is blocked locally.
 
 ### Phase 5 — Domain-specific guards (Video Reposter)
-- [ ] `admin-dashboard` test scaffold + add it to root `npm test` (closes A.3 gap).
-- [ ] FFmpeg command-generation regression test note (golden args, not full media) wired into
+- [x] `admin-dashboard` test scaffold + add it to root `npm test` (closes A.3 gap).
+- [x] FFmpeg command-generation regression test note (golden args, not full media) wired into
       `desktop-app` tests.
-- [ ] License/JWT/rate-limit security cases enumerated for `security-auditor`.
-- [ ] Document the content pipeline (intake → transform → output) as the `ui-verifier`/`run` target.
+- [x] License/JWT/rate-limit security cases enumerated for `security-auditor`.
+- [x] Document the content pipeline (intake → transform → output) as the `ui-verifier`/`run` target.
 
 **Acceptance:** admin has at least a smoke test; pipeline + security checks are runnable.
 
 ### Phase 6 — Verify, self-review, and document
-- [ ] Run `skills-health-check` → all agents/commands/hooks wired, no dangling path refs.
-- [ ] Self-consistency pass: re-read `CLAUDE.md` as a critic; fix contradictions.
-- [ ] Write `docs/decisions/0002-claude-config-architecture.md` (ADR for this overhaul).
-- [ ] Update memory with the non-obvious facts (Vite-not-Next, ffmpeg-static, Supabase dual-repo).
+- [x] Run `skills-health-check` → all agents/commands/hooks wired, no dangling path refs.
+- [x] Self-consistency pass: re-read `CLAUDE.md` as a critic; fix contradictions.
+- [x] Write `docs/decisions/0002-claude-config-architecture.md` (ADR for this overhaul).
+- [x] Update memory with the non-obvious facts (Vite-not-Next, ffmpeg-static, Supabase dual-repo).
 
 **Acceptance:** Part J checklist fully green.
 
@@ -329,15 +329,15 @@ deploying, installing Tailwind/Next.js. Those stay in `docs/plan.md`’s product
 
 ## Part J — Definition of Done (for this overhaul)
 
-- [ ] Root `CLAUDE.md` exists, is accurate, and auto-loads.
-- [ ] `.claude/settings.json` is valid (real schema), with a current model id, permissions, and hooks.
-- [ ] No documentation claims a technology the code does not use (A.3 fully reconciled).
-- [ ] All 5 agents + 6 commands exist, are wired, and run on the current repo.
-- [ ] `/skills-health-check` reports zero dangling references.
-- [ ] Local gate blocks a planted lint error, type error, and fake secret.
-- [ ] `npm test` and `npm run build` still green; `admin-dashboard` has at least a smoke test in `npm test`.
-- [ ] Three worktree meanings are documented and the Agent-worktree policy is in CLAUDE.md.
-- [ ] ADRs written; memory updated with the non-obvious facts.
+- [x] Root `CLAUDE.md` exists, is accurate, and auto-loads.
+- [x] `.claude/settings.json` is valid (real schema), with a current model id, permissions, and hooks.
+- [x] No documentation claims a technology the code does not use (A.3 fully reconciled).
+- [x] All 5 agents + 6 commands exist, are wired, and run on the current repo.
+- [x] `/skills-health-check` reports zero dangling references.
+- [x] Local gate blocks a planted lint error, type error, and fake secret.
+- [x] `npm test` and `npm run build` still green; `admin-dashboard` has at least a smoke test in `npm test`.
+- [x] Three worktree meanings are documented and the Agent-worktree policy is in CLAUDE.md.
+- [x] ADRs written; memory updated with the non-obvious facts.
 
 ---
 
