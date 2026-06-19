@@ -896,9 +896,27 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
               {visiblePresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
             </select>
           </div>
-          <div>
-            <span>Current Batch Output</span>
-            <strong>{currentBatchOutputDir || "Same folder as source"}</strong>
+          <div className="output-folder-picker">
+            <label>Output Folder</label>
+            <div className="output-folder-row">
+              <span className="output-folder-path" title={currentBatchOutputDir || "Same folder as source video"}>
+                {currentBatchOutputDir ? currentBatchOutputDir : <em>Same folder as source</em>}
+              </span>
+              <button type="button" aria-label="Choose current batch output folder" onClick={chooseCurrentBatchOutputFolder}>
+                <FolderOpen size={15} /> Choose
+              </button>
+              {currentBatchOutputDir && (
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Clear output folder — reset to same folder as source"
+                  title="Reset to same folder as source"
+                  onClick={() => { setCurrentBatchOutputDir(""); appendLog(setLogs, "Output folder cleared — files will be saved next to the source video."); }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
           </div>
           <div>
             <label htmlFor="new-batch-output-template">Output Name</label>
@@ -971,7 +989,6 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
               onChange={(event) => updateCurrentBatchMaxWorkers(Number(event.target.value))}
             />
           </div>
-          <button aria-label="Choose current batch output folder" title="Choose current batch output folder" onClick={chooseCurrentBatchOutputFolder}><FolderOpen size={17} /> Choose Folder</button>
         </section>
         <TransformPanel transforms={transforms} running={false} onChange={updateTransforms} />
         <section className="new-batch-start">

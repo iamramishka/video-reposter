@@ -1043,6 +1043,80 @@ select:focus-visible {
   margin-top: 18px;
 }
 
+/* A3: output folder picker row */
+.output-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.output-folder-path {
+  flex: 1;
+  overflow: hidden;
+  min-height: 40px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  background: #f8fafc;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.output-folder-path em {
+  color: #94a3b8;
+  font-style: normal;
+}
+
+.batch-destination .icon-button {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  border-radius: 6px;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #dbe3ef;
+}
+
+.batch-destination .icon-button:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+/* A5: custom resolution inputs */
+.resolution-inputs {
+  grid-column: 1 / -1;
+}
+
+.resolution-fields {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resolution-fields input {
+  width: 110px;
+  flex-shrink: 0;
+}
+
+.resolution-fields span {
+  font-size: 16px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
 .new-batch-start {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.5fr) max-content;
