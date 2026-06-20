@@ -18,7 +18,7 @@ The repository includes a Vercel configuration for deploying the admin dashboard
 
 ### Required project settings
 
-Set these Vercel environment variables before deploying:
+Use `.env.production.example` as the non-secret template for required production values. Set these Vercel environment variables before deploying:
 
 ```
 DATABASE_URL=postgresql://...
@@ -103,7 +103,7 @@ npm install --workspaces
 npm run build --workspace=backend   # compiles TypeScript
 
 # Start with PM2
-pm2 start dist/server.js --name video-reposter-api \
+pm2 start dist/src/server.js --name video-reposter-api \
   --env production \
   --max-memory-restart 512M
 

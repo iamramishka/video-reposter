@@ -4,6 +4,7 @@ import path from "node:path";
 
 const args = parseArgs(process.argv.slice(2));
 const envPath = path.resolve(args.env ?? ".env.production");
+const exampleEnvPath = path.resolve(".env.production.example");
 const env = {
   ...process.env,
   ...(existsSync(envPath) ? parseEnvFile(readFileSync(envPath, "utf8")) : {})
@@ -26,6 +27,10 @@ console.log("# Production Readiness Check");
 console.log("");
 console.log(`Host: ${os.hostname()}`);
 console.log(`Env file: ${existsSync(envPath) ? envPath : `${envPath} (not found; process env only)`}`);
+if (!existsSync(envPath) && existsSync(exampleEnvPath)) {
+  console.log(`Template: ${exampleEnvPath}`);
+  console.log("Tip: copy the template to `.env.production`, fill real production values, then rerun this check.");
+}
 console.log("");
 for (const result of results) {
   console.log(`- ${badge(result.status)} ${result.name}: ${result.message}`);
@@ -68,7 +73,13 @@ function unquote(value) {
 
 function checkRequired(name, message) {
   const value = env[name]?.trim();
-  add(value ? "pass" : "fail", name, value ? "configured" : message);
+  if (!value) {
+    add("fail", name, message);
+  } else if (isPlaceholderValue(value)) {
+    add("fail", name, "Replace the template placeholder with the real production value.");
+  } else {
+    add("pass", name, "configured");
+  }
 }
 
 function checkJwtSecret() {
@@ -87,6 +98,8 @@ function checkCorsOrigin() {
   const value = env.CORS_ORIGIN?.trim() ?? "";
   if (!value) {
     add("fail", "CORS_ORIGIN", "Set CORS_ORIGIN to the exact admin dashboard HTTPS origin.");
+  } else if (isPlaceholderValue(value)) {
+    add("fail", "CORS_ORIGIN", "Replace the template placeholder with the exact production admin dashboard origin.");
   } else if (value === "*" || value.includes(",")) {
     add("fail", "CORS_ORIGIN", "Use one exact admin dashboard origin, not `*` or a comma-separated list.");
   } else if (!value.startsWith("https://")) {
@@ -98,12 +111,16 @@ function checkCorsOrigin() {
 
 function checkAdminPassword() {
   const value = env.ADMIN_PASSWORD?.trim() ?? "";
-  if (!value) return;
+  if (!value || isPlaceholderValue(value)) return;
   if (value === "admin12345" || value.length < 12) {
     add("fail", "ADMIN_PASSWORD", "Use a strong production admin password; do not keep the development default.");
   } else {
     add("pass", "ADMIN_PASSWORD", "not the development default.");
   }
+}
+
+function isPlaceholderValue(value) {
+  return /(<[^>]+>|replace-with|your-|example\.com|example\.org|example\.net|user:password@host|localhost|127\.0\.0\.1)/i.test(value);
 }
 
 async function checkHealthEndpoints() {
