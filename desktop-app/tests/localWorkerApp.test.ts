@@ -56,6 +56,37 @@ describe("local worker app", () => {
     await reader.cancel();
   });
 
+  it("forwards processing telemetry with bearer auth and payload body", async () => {
+    const received: { authorization?: string; body?: unknown }[] = [];
+    const licenseApiUrl = await startTelemetryApi(received);
+    const { baseUrl } = await startWorker({ serverUrl: licenseApiUrl });
+    const payload = {
+      jobId: "job-1",
+      status: "complete" as const,
+      preset: "instagram-reel",
+      elapsedMs: 1234
+    };
+
+    await expect(postJson(`${baseUrl}/api/local/telemetry/processing`, { payload }, { Authorization: "Bearer VDRP-TEST-KEY" })).resolves.toEqual({ value: true });
+
+    expect(received).toEqual([
+      {
+        authorization: "Bearer VDRP-TEST-KEY",
+        body: payload
+      }
+    ]);
+  });
+
+  it("rejects malformed processing telemetry before forwarding", async () => {
+    const received: { authorization?: string; body?: unknown }[] = [];
+    const licenseApiUrl = await startTelemetryApi(received);
+    const { baseUrl } = await startWorker({ serverUrl: licenseApiUrl });
+
+    await expect(postJson(`${baseUrl}/api/local/telemetry/processing`, { payload: { jobId: "" } }, { Authorization: "Bearer VDRP-TEST-KEY" })).resolves.toEqual({ value: false });
+
+    expect(received).toEqual([]);
+  });
+
   it("returns empty file selections when native dialogs are canceled", async () => {
     const { baseUrl } = await startWorker();
 
@@ -169,6 +200,28 @@ async function startWorker(overrides: Partial<Parameters<typeof createLocalWorke
   return { baseUrl: `http://127.0.0.1:${address.port}`, broadcast: worker.broadcast };
 }
 
+async function startTelemetryApi(received: { authorization?: string; body?: unknown }[]) {
+  const server = http.createServer(async (req, res) => {
+    if (req.method === "POST" && req.url === "/api/telemetry/processing") {
+      received.push({
+        authorization: req.headers.authorization,
+        body: await readRequestJson(req)
+      });
+      res.writeHead(202, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Telemetry API did not bind a TCP port.");
+  return `http://127.0.0.1:${address.port}`;
+}
+
 function fakeProcessingService() {
   return {
     checkFfmpeg: async () => ({ available: true, message: "ffmpeg fake" }),
@@ -183,13 +236,21 @@ async function readJson(url: string) {
   return response.json();
 }
 
-async function postJson<T = unknown>(url: string, body: unknown): Promise<T> {
+async function postJson<T = unknown>(url: string, body: unknown, headers?: Record<string, string>): Promise<T> {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body)
   });
   return response.json() as Promise<T>;
+}
+
+async function readRequestJson(req: http.IncomingMessage) {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
 }
 
 async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, needle: string) {
