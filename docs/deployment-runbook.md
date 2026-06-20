@@ -25,6 +25,7 @@ DATABASE_URL=postgresql://...
 JWT_SECRET=<64+ random bytes>
 CORS_ORIGIN=https://<your-vercel-domain-or-custom-admin-domain>
 VITE_API_URL=https://<your-vercel-domain-or-custom-api-domain>
+PRODUCTION_BASE_URL=https://<your-vercel-domain-or-custom-api-domain>
 ADMIN_EMAIL=your@admin.email
 ADMIN_PASSWORD=<strong password>
 ```
@@ -50,6 +51,7 @@ Vercel uses `vercel.json`, which runs `npm run build:production`, publishes `adm
 ```bash
 curl https://<deployment-domain>/api/health
 curl https://<deployment-domain>/api/health/detailed
+npm run check:production -- --env .env.production --base-url https://<deployment-domain>
 ```
 
 Open the admin dashboard URL and confirm login, package list, license list, analytics, and PDF export.
@@ -69,6 +71,7 @@ PORT=4000
 ADMIN_EMAIL=your@admin.email
 ADMIN_PASSWORD=<strong password>
 CORS_ORIGIN=https://your-admin-dashboard.example.com
+PRODUCTION_BASE_URL=https://api.videoreposter.example.com
 
 # Optional — Supabase REST repositories (replaces PostgreSQL direct connection)
 SUPABASE_URL=https://xxx.supabase.co
@@ -116,6 +119,16 @@ GET /api/health/detailed     → { ok, uptime, database: { status, latencyMs }, 
 ```
 
 Use `/api/health/detailed` as the probe URL for your load balancer or uptime monitor.
+
+### Local readiness guard
+
+Run the local production readiness check before handoff:
+
+```bash
+npm run check:production -- --env .env.production --base-url https://api.videoreposter.example.com
+```
+
+The guard fails for missing/default critical env values and failed health probes. It reports external operations, such as uptime monitors, PM2 log rotation, database backups, and TLS renewal, as warnings because those must be confirmed in the production provider or server.
 
 ### nginx reverse proxy (example)
 

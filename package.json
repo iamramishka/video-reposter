@@ -16,6 +16,7 @@
     "lint": "powershell -ExecutionPolicy Bypass -File .claude/hooks/pre-commit-guard.ps1 -Mode Lint",
     "typecheck": "npm run typecheck -w backend && npm run typecheck -w desktop-app && npm run typecheck -w admin-dashboard",
     "profile:performance": "node scripts/performance-report.mjs",
+    "check:production": "node scripts/production-readiness-check.mjs",
     "ship": "powershell -ExecutionPolicy Bypass -File .claude/hooks/pre-commit-guard.ps1 -Mode Ship",
     "deploy:production": "npm run build:production && npx vercel deploy --prod",
     "prepare": "husky",
