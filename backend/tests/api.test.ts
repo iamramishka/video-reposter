@@ -18,6 +18,8 @@ import { MemoryPackageRepository } from "./memoryPackageRepository.js";
 import { MemoryProcessingTelemetryRepository } from "./memoryProcessingTelemetryRepository.js";
 import { MemoryUserRepository } from "./memoryUserRepository.js";
 
+const BCRYPT_TEST_TIMEOUT_MS = 30_000;
+
 class FakeEmailService implements LicenseEmailService {
   sentExpiryReminders: { key: string; daysRemaining: number }[] = [];
 
@@ -339,7 +341,7 @@ describe("license API", () => {
         metadata: expect.objectContaining({ email: "login-audit@videoreposter.local", reason: "invalid_credentials" })
       })
     ]);
-  }, 15_000);
+  }, BCRYPT_TEST_TIMEOUT_MS);
 
   it("returns customer summaries and analytics", async () => {
     const licenseRepository = new MemoryLicenseRepository();
@@ -709,7 +711,7 @@ describe("license API", () => {
       .post("/api/auth/login")
       .send({ email: "admin@videoreposter.local", password: "new-password-123" })
       .expect(200);
-  }, 15_000);
+  }, BCRYPT_TEST_TIMEOUT_MS);
 
   it("returns and updates configurable admin session timeout", async () => {
     const passwordHash = await bcrypt.hash("admin-password-123", 12);
@@ -762,7 +764,7 @@ describe("license API", () => {
       .set("Authorization", `Bearer ${readOnlyToken}`)
       .send({ timeoutMinutes: 60 })
       .expect(403);
-  }, 15_000);
+  }, BCRYPT_TEST_TIMEOUT_MS);
 
   it("reassigns a license to a new device after device reset", async () => {
     const service = new LicenseService(new MemoryLicenseRepository());
