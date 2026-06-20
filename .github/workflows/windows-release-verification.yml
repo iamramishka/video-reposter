@@ -37,6 +37,11 @@ jobs:
       - name: Run desktop tests
         run: npm test -w desktop-app
 
+      - name: Check Windows signing configuration
+        if: ${{ inputs.require_signature }}
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File scripts/check-windows-signing.ps1 -RequireSigning
+
       - name: Build Windows distributions
         run: npm run dist -w desktop-app
 

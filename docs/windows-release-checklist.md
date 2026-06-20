@@ -41,6 +41,18 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-windows-release.ps1 -Req
 
 Electron Builder automatically uses the standard `CSC_LINK` and `CSC_KEY_PASSWORD` environment variables when a Windows code-signing certificate is available. Never commit the certificate or password.
 
+Before a signed release build, confirm the signing environment is present:
+
+```powershell
+npm run check:windows-signing
+```
+
+To fail fast when signing is required:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/check-windows-signing.ps1 -RequireSigning
+```
+
 ## Separate Clean-PC Check
 
 Copy the entire repository or the release artifacts and verification script to a separate Windows 10/11 x64 PC that has never had Video Reposter installed. Then:
