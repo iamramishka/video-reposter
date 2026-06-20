@@ -89,7 +89,7 @@ function createLocalWorkerBridge(): VideoReposterBridge {
     selectVideoFiles: () => requestJson<ImportedVideoFile[]>("/files/select-videos"),
     selectVideoFolder: () => requestJson<ImportedVideoFile[]>("/files/select-video-folder"),
     selectOutputFolder: () => requestJson<string | null>("/files/select-output-folder"),
-    sendProcessingTelemetry: (licenseKey, payload) => requestJson<boolean>("/telemetry/processing", { licenseKey, payload }),
+    sendProcessingTelemetry: (licenseKey, payload) => requestJson<boolean>("/telemetry/processing", { payload }, { Authorization: `Bearer ${licenseKey}` }),
     onProcessingUpdate: (callback) => {
       const events = new EventSource(`${localApiBase}/processing/events`);
       events.addEventListener("processing:update", (event) => {
@@ -101,10 +101,14 @@ function createLocalWorkerBridge(): VideoReposterBridge {
   };
 }
 
-async function requestJson<T>(path: string, body?: unknown): Promise<T> {
+async function requestJson<T>(path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
+  const headers =
+    body === undefined && extraHeaders === undefined
+      ? undefined
+      : { ...(body !== undefined ? { "Content-Type": "application/json" } : {}), ...extraHeaders };
   const response = await fetch(`${localApiBase}${path}`, {
     method: body === undefined ? "GET" : "POST",
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   const payload = (await response.json().catch(() => null)) as { value?: T; message?: string } | null;

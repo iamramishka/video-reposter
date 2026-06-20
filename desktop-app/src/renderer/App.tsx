@@ -1312,7 +1312,7 @@ function Dashboard({ license, state }: { license: CachedLicense | null; state: L
         event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
       }}
       onDragLeave={() => {
-        dragCounterRef.current -= 1;
+        dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
         if (dragCounterRef.current === 0) setIsDraggingOver(false);
       }}
       onDrop={(event) => {
@@ -1750,7 +1750,7 @@ function DeviceConflictHelp({ device, licenseKey, onContact }: { device: DeviceI
     "",
     `License key: ${hasKey ? licenseKey : "(enter key above first)"}`,
     `Device name: ${device.deviceName}`,
-    `Device ID:   ${device.deviceId.slice(0, 24).toUpperCase()}`,
+    `Device ID:   ${device.deviceId.toUpperCase()}`,
     "",
     "Please reset the device binding so I can activate on this computer. Thank you."
   ].join("\n");

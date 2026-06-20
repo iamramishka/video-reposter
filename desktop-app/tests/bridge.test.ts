@@ -73,6 +73,30 @@ describe("renderer bridge", () => {
     });
   });
 
+  it("sends local worker telemetry with a bearer token and wrapped payload", async () => {
+    vi.stubGlobal("window", {
+      location: { protocol: "http:", hostname: "127.0.0.1" }
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ value: true })));
+    vi.stubGlobal("fetch", fetchMock);
+    const payload = {
+      jobId: "job-1",
+      status: "complete" as const,
+      preset: "instagram-reel",
+      elapsedMs: 1234
+    };
+
+    await expect(createVideoReposterBridge().sendProcessingTelemetry("VDRP-TEST-KEY", payload)).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith("/api/local/telemetry/processing", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer VDRP-TEST-KEY"
+      },
+      body: JSON.stringify({ payload })
+    });
+  });
+
   it("builds an encoded local preview URL for native video paths", async () => {
     vi.stubGlobal("window", {
       location: { protocol: "http:", hostname: "127.0.0.1" }

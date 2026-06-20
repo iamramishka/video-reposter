@@ -220,8 +220,9 @@ export function createLocalWorkerApp(options: LocalWorkerAppOptions) {
 
   api.post("/api/local/telemetry/processing", async (req, res, next) => {
     try {
-      const body = req.body as { licenseKey?: unknown; payload?: unknown };
-      const licenseKey = typeof body.licenseKey === "string" ? body.licenseKey : "";
+      const authHeader = String(req.headers.authorization ?? "");
+      const licenseKey = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      const body = req.body as { payload?: unknown };
       res.json({ value: isProcessingTelemetryPayload(body.payload) ? await licenseClient.sendProcessingTelemetry(licenseKey, body.payload) : false });
     } catch (error) {
       next(error);
