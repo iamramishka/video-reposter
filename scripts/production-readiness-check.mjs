@@ -13,9 +13,10 @@ const results = [];
 
 checkRequired("DATABASE_URL", "Required for Prisma migrations and direct PostgreSQL repositories.");
 checkRequired("ADMIN_EMAIL", "Required for seeded/admin access.");
-checkRequired("ADMIN_PASSWORD", "Required for seeded/admin access.");
 checkJwtSecret();
 checkCorsOrigin();
+checkHttpsUrl("VITE_API_URL", "Required when building the admin dashboard for production.");
+checkHttpsUrl("PRODUCTION_BASE_URL", "Required so health checks, emails, and deployment probes use the public API origin.");
 checkAdminPassword();
 await checkHealthEndpoints();
 addOpsWarnings();
@@ -111,11 +112,25 @@ function checkCorsOrigin() {
 
 function checkAdminPassword() {
   const value = env.ADMIN_PASSWORD?.trim() ?? "";
-  if (!value || isPlaceholderValue(value)) return;
-  if (value === "admin12345" || value.length < 12) {
+  if (!value) {
+    add("fail", "ADMIN_PASSWORD", "Required for seeded/admin access.");
+  } else if (isPlaceholderValue(value) || value === "admin12345" || value.length < 12) {
     add("fail", "ADMIN_PASSWORD", "Use a strong production admin password; do not keep the development default.");
   } else {
     add("pass", "ADMIN_PASSWORD", "not the development default.");
+  }
+}
+
+function checkHttpsUrl(name, missingMessage) {
+  const value = env[name]?.trim() ?? "";
+  if (!value) {
+    add("fail", name, missingMessage);
+  } else if (isPlaceholderValue(value)) {
+    add("fail", name, "Replace the template placeholder with the real production URL.");
+  } else if (!value.startsWith("https://")) {
+    add("fail", name, "Use an HTTPS production URL.");
+  } else {
+    add("pass", name, "configured as an HTTPS production URL.");
   }
 }
 
