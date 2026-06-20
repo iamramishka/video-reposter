@@ -140,7 +140,7 @@ function isPlaceholderValue(value) {
 
 async function checkHealthEndpoints() {
   const baseUrl = (args.baseUrl ?? env.PRODUCTION_BASE_URL ?? env.VITE_API_URL ?? "").replace(/\/+$/, "");
-  if (!baseUrl || baseUrl.startsWith("http://localhost") || baseUrl.startsWith("http://127.0.0.1") || baseUrl.includes("example.com")) {
+  if (!baseUrl || (!args.baseUrl && (baseUrl.startsWith("http://localhost") || baseUrl.startsWith("http://127.0.0.1") || baseUrl.includes("example.com")))) {
     add("warn", "Health endpoints", "Set PRODUCTION_BASE_URL or pass `--base-url https://...` to probe deployed health endpoints.");
     return;
   }
