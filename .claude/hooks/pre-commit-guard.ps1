@@ -140,6 +140,9 @@ function Invoke-LintGuard {
     if ($file -match "(^|/)(dist|dist-electron|dist-renderer|release|node_modules)/") {
       continue
     }
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+      continue
+    }
 
     $lineNumber = 0
     foreach ($line in Get-Content -LiteralPath $file) {
