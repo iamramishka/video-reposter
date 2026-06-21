@@ -248,7 +248,7 @@ Always take a `pg_dump` snapshot before running `migrate deploy` in production.
 
 ## 5. Monitoring checklist
 
-- [ ] Uptime monitor on `GET /api/health` (≤ 1 min interval)
+- [ ] GitHub `Production Health Monitor` workflow enabled, or equivalent external uptime monitor on `GET /api/health`
 - [ ] Alert if `GET /api/health-detailed` returns `ok: false`
 - [ ] PM2 log rotation: `pm2 install pm2-logrotate`
 - [ ] PostgreSQL WAL archiving or managed backup enabled
