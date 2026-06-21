@@ -1,0 +1,40 @@
+name: Production Health Monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRODUCTION_BASE_URL: https://video-reposter.vercel.app
+
+jobs:
+  probe:
+    name: Probe production health endpoints
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Check health endpoints
+        shell: bash
+        run: |
+          node <<'NODE'
+          const baseUrl = process.env.PRODUCTION_BASE_URL.replace(/\/+$/, "");
+          const endpoints = ["/api/health", "/api/health-detailed"];
+
+          for (const endpoint of endpoints) {
+            const url = `${baseUrl}${endpoint}`;
+            const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+            const contentType = response.headers.get("content-type") ?? "";
+            const body = contentType.includes("application/json") ? await response.json() : null;
+
+            if (!response.ok || body?.ok !== true) {
+              throw new Error(`${endpoint} failed: HTTP ${response.status}, body=${JSON.stringify(body)}`);
+            }
+
+            console.log(`${endpoint} OK`);
+          }
+          NODE
