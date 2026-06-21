@@ -5,14 +5,15 @@ import { createRequire } from "node:module";
 
 test("Vercel health routes forward to the expected Express paths", () => {
   const require = createRequire(import.meta.url);
-  const handlerPath = path.resolve(import.meta.dirname, "_handler.js");
-  const basicRoutePath = path.resolve(import.meta.dirname, "health.js");
-  const catchAllRoutePath = path.resolve(import.meta.dirname, "[...path].js");
+  const apiDir = path.resolve(import.meta.dirname, "../api");
+  const handlerPath = path.join(apiDir, "_handler.js");
+  const basicRoutePath = path.join(apiDir, "health.js");
+  const detailedRoutePath = path.join(apiDir, "health-detailed.js");
   const calls = [];
 
   delete require.cache[handlerPath];
   delete require.cache[basicRoutePath];
-  delete require.cache[catchAllRoutePath];
+  delete require.cache[detailedRoutePath];
   require.cache[handlerPath] = {
     id: handlerPath,
     filename: handlerPath,
@@ -23,7 +24,7 @@ test("Vercel health routes forward to the expected Express paths", () => {
   };
 
   require(basicRoutePath)({ url: "/api/health" }, {});
-  require(catchAllRoutePath)({ url: "/api/health/detailed", query: { path: ["health", "detailed"] } }, {});
+  require(detailedRoutePath)({ url: "/api/health-detailed" }, {});
 
-  assert.deepEqual(calls.map((call) => call.apiPath), ["/api/health", "/api/health/detailed"]);
+  assert.deepEqual(calls.map((call) => call.apiPath), ["/api/health", "/api/health-detailed"]);
 });

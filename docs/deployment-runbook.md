@@ -50,7 +50,7 @@ Vercel uses `vercel.json`, which runs `npm run build:production`, publishes `adm
 
 ```bash
 curl https://<deployment-domain>/api/health
-curl https://<deployment-domain>/api/health/detailed
+curl https://<deployment-domain>/api/health-detailed
 npm run check:production -- --env .env.production --base-url https://<deployment-domain>
 ```
 
@@ -115,10 +115,10 @@ pm2 startup   # registers PM2 on system boot
 
 ```
 GET /api/health              → { ok: true }
-GET /api/health/detailed     → { ok, uptime, database: { status, latencyMs }, email: { configured } }
+GET /api/health-detailed     → { ok, uptime, database: { status, latencyMs }, email: { configured } }
 ```
 
-Use `/api/health/detailed` as the probe URL for your load balancer or uptime monitor.
+Use `/api/health-detailed` as the probe URL for your load balancer or uptime monitor.
 
 ### Local readiness guard
 
@@ -249,7 +249,7 @@ Always take a `pg_dump` snapshot before running `migrate deploy` in production.
 ## 5. Monitoring checklist
 
 - [ ] Uptime monitor on `GET /api/health` (≤ 1 min interval)
-- [ ] Alert if `GET /api/health/detailed` returns `ok: false`
+- [ ] Alert if `GET /api/health-detailed` returns `ok: false`
 - [ ] PM2 log rotation: `pm2 install pm2-logrotate`
 - [ ] PostgreSQL WAL archiving or managed backup enabled
 - [ ] TLS certificate auto-renewal (certbot or Caddy handles this automatically)
