@@ -80,7 +80,7 @@ export function createApp(options?: {
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, service: "video-reposter-api" });
   });
-  app.get("/api/health/detailed", async (_req, res, next) => {
+  const detailedHealthHandler = async (_req: express.Request, res: express.Response, next: express.NextFunction) => {
     try {
       let database: { status: string; latencyMs?: number } = { status: "not_checked" };
       if (!config.supabaseUrl) {
@@ -102,7 +102,9 @@ export function createApp(options?: {
     } catch (error) {
       next(error);
     }
-  });
+  };
+  app.get("/api/health/detailed", detailedHealthHandler);
+  app.get("/api/health-detailed", detailedHealthHandler);
 
   app.use("/api/auth", createAuthRouter(options?.authRepository ?? repositories.authRepository, auditRepository));
   app.use("/api", createLicenseRouter(licenseService, { requireAdminAuth: options?.requireAdminAuth ?? true }));

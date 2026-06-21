@@ -39,6 +39,7 @@ test("production readiness check passes configured env and healthy probes", asyn
     assert.equal(result.code, 0);
     assert.match(result.stdout, /PASS VITE_API_URL: configured as an HTTPS production URL\./);
     assert.match(result.stdout, /PASS GET \/api\/health:/);
+    assert.match(result.stdout, /PASS GET \/api\/health-detailed:/);
     assert.match(result.stdout, /Summary: 0 failed, 5 warnings, 9 passed\./);
   } finally {
     await server.close();
@@ -69,7 +70,7 @@ function runChecker(args) {
 function startHealthServer() {
   const server = http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
-    if (req.url === "/api/health" || req.url === "/api/health/detailed") {
+    if (req.url === "/api/health" || req.url === "/api/health-detailed") {
       res.end(JSON.stringify({ ok: true }));
       return;
     }

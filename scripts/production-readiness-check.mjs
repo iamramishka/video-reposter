@@ -146,7 +146,7 @@ async function checkHealthEndpoints() {
   }
 
   await checkJsonEndpoint(`${baseUrl}/api/health`, "GET /api/health", (body) => body?.ok === true);
-  await checkJsonEndpoint(`${baseUrl}/api/health/detailed`, "GET /api/health/detailed", (body) => body?.ok === true);
+  await checkJsonEndpoint(`${baseUrl}/api/health-detailed`, "GET /api/health-detailed", (body) => body?.ok === true);
 }
 
 async function checkJsonEndpoint(url, name, isHealthy) {
@@ -165,7 +165,7 @@ async function checkJsonEndpoint(url, name, isHealthy) {
 
 function addOpsWarnings() {
   add("warn", "External uptime monitor", "Confirm provider monitor probes `/api/health` every 60 seconds or less.");
-  add("warn", "Detailed health alert", "Confirm provider alert fires when `/api/health/detailed` returns `ok: false`.");
+  add("warn", "Detailed health alert", "Confirm provider alert fires when `/api/health-detailed` returns `ok: false`.");
   add("warn", "PM2 log rotation", "On PM2 hosts run `pm2 install pm2-logrotate` and confirm retention settings.");
   add("warn", "Database backups", "Confirm PostgreSQL WAL archiving or managed daily backups outside the repo.");
   add("warn", "TLS auto-renewal", "Confirm certbot/Caddy/provider TLS certificate renewal outside the repo.");

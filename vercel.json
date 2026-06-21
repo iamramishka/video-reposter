@@ -4,10 +4,6 @@
   "installCommand": "npm install",
   "rewrites": [
     {
-      "source": "/api/health/detailed",
-      "destination": "/api/health/detailed"
-    },
-    {
       "source": "/api/:path*",
       "destination": "/api/:path*"
     },
