@@ -2,9 +2,8 @@
   "buildCommand": "npm run build:production",
   "outputDirectory": "admin-dashboard/dist",
   "installCommand": "npm install",
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/router?path=$1" },
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/index.html" }
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/router?path=$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
