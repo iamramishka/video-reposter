@@ -323,7 +323,7 @@ export class LicenseService {
   }
 
   async validate(input: z.infer<typeof devicePayloadSchema>) {
-    const payload = devicePayloadSchema.parse({ ...input, key: normalizeLicenseKey(input.key) });
+    const payload = devicePayloadSchema.parse({ ...input, key: normalizeLicenseKey(input.key ?? "") });
     if (!isLicenseKey(payload.key)) {
       throw new LicenseError("LIC_FORMAT", 400, "Invalid license key format");
     }
@@ -343,7 +343,7 @@ export class LicenseService {
   }
 
   async activate(input: z.infer<typeof devicePayloadSchema>) {
-    const payload = devicePayloadSchema.parse({ ...input, key: normalizeLicenseKey(input.key) });
+    const payload = devicePayloadSchema.parse({ ...input, key: normalizeLicenseKey(input.key ?? "") });
     if (!isLicenseKey(payload.key)) {
       throw new LicenseError("LIC_FORMAT", 400, "Invalid license key format");
     }
