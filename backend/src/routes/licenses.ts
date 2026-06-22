@@ -138,6 +138,16 @@ export function createLicenseRouter(service: LicenseService, options: { requireA
     }
   });
 
+  router.post("/license/restore", ...writableAdminOnly, async (req, res, next) => {
+    try {
+      const body = z.object({ key: z.string() }).parse(req.body);
+      res.json({ license: await service.restore(body.key, getAdminActor(req)) });
+    } catch (error) {
+      const response = sendError(error, res);
+      if (!response) next(error);
+    }
+  });
+
   router.delete("/license/:key", ...writableAdminOnly, async (req, res, next) => {
     try {
       const { key } = keyParamSchema.parse(req.params);

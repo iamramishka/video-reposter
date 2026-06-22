@@ -96,6 +96,14 @@ export class PrismaLicenseRepository implements LicenseRepository {
     }) as Promise<LicenseRecord>;
   }
 
+  restore(key: string): Promise<LicenseRecord> {
+    return this.prisma.license.update({
+      where: { key },
+      data: { status: "pending", deviceId: null, hostname: null, os: null, activatedAt: null },
+      include: includeUser()
+    }) as Promise<LicenseRecord>;
+  }
+
   softDelete(key: string, retentionUntil: Date): Promise<LicenseRecord> {
     const now = new Date();
     return this.prisma.license.update({

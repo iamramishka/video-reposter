@@ -61,6 +61,7 @@ export interface LicenseRepository {
   touchVerification(key: string): Promise<LicenseRecord>;
   renew(key: string, expiresAt: Date): Promise<LicenseRecord>;
   revoke(key: string): Promise<LicenseRecord>;
+  restore(key: string): Promise<LicenseRecord>;
   softDelete(key: string, retentionUntil: Date): Promise<LicenseRecord>;
   resetDevice(key: string): Promise<LicenseRecord>;
   updateDetails(

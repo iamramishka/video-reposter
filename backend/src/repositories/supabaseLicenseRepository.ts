@@ -93,6 +93,10 @@ export class SupabaseLicenseRepository implements LicenseRepository {
     return this.updateByKey(key, { status: "revoked" });
   }
 
+  restore(key: string): Promise<LicenseRecord> {
+    return this.updateByKey(key, { status: "pending", deviceId: null, hostname: null, os: null, activatedAt: null });
+  }
+
   softDelete(key: string, retentionUntil: Date): Promise<LicenseRecord> {
     const now = new Date().toISOString();
     return this.updateByKey(key, {

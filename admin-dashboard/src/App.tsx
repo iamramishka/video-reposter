@@ -636,7 +636,7 @@ export default function AdminDashboard() {
   const filteredLicenses = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return licenses.filter((license) => {
-      const matchesStatus = statusFilter === "all" || license.status === statusFilter;
+      const matchesStatus = statusFilter === "all" ? license.status !== "revoked" : license.status === statusFilter;
       const matchesPlan = planFilter === "all" || license.plan === planFilter;
       const matchesExpiry = matchesExpiryWindow(license, expiryFilter);
       const matchesDevice = deviceFilter === "all" || (deviceFilter === "bound" ? Boolean(license.device_id) : !license.device_id);
@@ -780,6 +780,11 @@ export default function AdminDashboard() {
               if (window.confirm(`Revoke ${license.license_key}? The customer will lose access.`)) {
                 const clearIfSelected = license.license_key === selectedLicenseKey ? () => setSelectedLicenseKey("") : undefined;
                 void licenseAction("/api/license/revoke", license.license_key, `Revoked ${license.license_key}.`, {}, clearIfSelected);
+              }
+            }}
+            onRestore={(license) => {
+              if (window.confirm(`Restore ${license.license_key}? This will set it back to pending.`)) {
+                void licenseAction("/api/license/restore", license.license_key, `Restored ${license.license_key}.`);
               }
             }}
             onSelect={(license) => setSelectedLicenseKey(license.license_key)}
@@ -1003,6 +1008,7 @@ function LicenseManagement({
   onExtend,
   onReassign,
   onRevoke,
+  onRestore,
   onSelect,
   onCopied,
   onExport,
@@ -1026,6 +1032,7 @@ function LicenseManagement({
   onExtend: (license: License, days: number) => void;
   onReassign: (license: License) => void;
   onRevoke: (license: License) => void;
+  onRestore: (license: License) => void;
   onSelect: (license: License) => void;
   onCopied: (key: string) => void;
   onExport: () => void;
@@ -1041,7 +1048,7 @@ function LicenseManagement({
             <input placeholder="Search licenses" value={query} onChange={(event) => setQuery(event.target.value)} />
           </label>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-            <option value="all">All Statuses</option>
+            <option value="all">All (excl. Revoked)</option>
             <option value="pending">Pending</option>
             <option value="active">Active</option>
             <option value="expired">Expired</option>
@@ -1084,6 +1091,7 @@ function LicenseManagement({
             onExtend={onExtend}
             onReassign={onReassign}
             onRevoke={onRevoke}
+            onRestore={onRestore}
             onSelect={onSelect}
             onCopied={onCopied}
             canWrite={canWrite}
@@ -1095,20 +1103,20 @@ function LicenseManagement({
   );
 }
 
-function LicenseRow({ license, busy, onUpdate, onExtend, onReassign, onRevoke, onSelect, onCopied, canWrite }: {
+function LicenseRow({ license, busy, onUpdate, onExtend, onReassign, onRevoke, onRestore, onSelect, onCopied, canWrite }: {
   license: License;
   busy: boolean;
   onUpdate: (license: License, patch: Partial<{ plan: Plan; expiresAt: string }>) => void;
   onExtend: (license: License, days: number) => void;
   onReassign: (license: License) => void;
   onRevoke: (license: License) => void;
+  onRestore: (license: License) => void;
   onSelect: (license: License) => void;
   onCopied: (key: string) => void;
   canWrite: boolean;
 }) {
   const [plan, setPlan] = useState<Plan>(license.plan);
   const [expiresAt, setExpiresAt] = useState(dateInputValue(license.expires_at));
-  const changed = plan !== license.plan || expiresAt !== dateInputValue(license.expires_at);
   const disabled = busy || !canWrite || license.status === "revoked";
 
   useEffect(() => {
@@ -1125,13 +1133,20 @@ function LicenseRow({ license, busy, onUpdate, onExtend, onReassign, onRevoke, o
         {license.user?.company && <small>{license.user.company}</small>}
       </div>
       <div>
-        <select value={plan} onChange={(event) => setPlan(event.target.value as Plan)} disabled={disabled}>
+        <select value={plan} onChange={(event) => {
+          const newPlan = event.target.value as Plan;
+          setPlan(newPlan);
+          onUpdate(license, { plan: newPlan, expiresAt });
+        }} disabled={disabled}>
           {Object.entries(planLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
         <span className={`pill ${license.status}`}>{license.status}</span>
       </div>
       <div>
-        <input type="date" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} disabled={disabled} />
+        <input type="date" value={expiresAt}
+          onChange={(event) => setExpiresAt(event.target.value)}
+          onBlur={() => { if (expiresAt !== dateInputValue(license.expires_at)) onUpdate(license, { plan, expiresAt }); }}
+          disabled={disabled} />
         <small>{daysUntil(license.expires_at)}</small>
       </div>
       <div className="mono">
@@ -1141,10 +1156,12 @@ function LicenseRow({ license, busy, onUpdate, onExtend, onReassign, onRevoke, o
       <div className="actions">
         <button title="Copy license key" onClick={() => navigator.clipboard.writeText(license.license_key).then(() => onCopied(license.license_key))}><Copy /></button>
         <button title="Open license detail" onClick={() => onSelect(license)}><Eye /></button>
-        <button title="Save plan or expiry changes" onClick={() => onUpdate(license, { plan, expiresAt })} disabled={!changed || disabled}><Save /></button>
         <button title="Extend expiry by 30 days" onClick={() => onExtend(license, 30)} disabled={disabled}><CalendarPlus /></button>
         <button title="Reassign device to another PC" onClick={() => onReassign(license)} disabled={disabled}><RotateCcw /></button>
-        <button title="Revoke customer access" onClick={() => onRevoke(license)} disabled={license.status === "revoked"}><Ban /></button>
+        {license.status === "revoked"
+          ? <button title="Restore license access" onClick={() => onRestore(license)} disabled={busy || !canWrite}><RefreshCcw /></button>
+          : <button title="Revoke customer access" onClick={() => onRevoke(license)} disabled={busy || !canWrite}><Ban /></button>
+        }
       </div>
     </>
   );

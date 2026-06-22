@@ -66,6 +66,10 @@ export class MemoryLicenseRepository implements LicenseRepository {
     return this.patch(key, { status: "revoked" });
   }
 
+  restore(key: string) {
+    return this.patch(key, { status: "pending", deviceId: null, hostname: null, os: null, activatedAt: null });
+  }
+
   softDelete(key: string, retentionUntil: Date) {
     return this.patch(key, {
       status: "revoked",

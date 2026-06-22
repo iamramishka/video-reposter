@@ -395,6 +395,16 @@ export class LicenseService {
     return toResponse(revoked, this.packageRepository);
   }
 
+  async restore(keyInput: string, actor?: AuditActor) {
+    const key = normalizeLicenseKey(keyInput ?? "");
+    const license = await this.findByKeyTimingSafe(key);
+    if (!license) throw new LicenseError("LIC_001", 404, "License not found");
+    if (license.status !== "revoked") throw new LicenseError("LIC_005", 400, "License is not revoked");
+    const restored = await this.repository.restore(license.key);
+    await this.audit("license.restored", restored, undefined, actor);
+    return toResponse(restored, this.packageRepository);
+  }
+
   async softDelete(keyInput: string, retentionDays = 30, actor?: AuditActor) {
     const key = normalizeLicenseKey(keyInput);
     const license = await this.findByKeyTimingSafe(key);
