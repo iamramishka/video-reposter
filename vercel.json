@@ -3,7 +3,7 @@
   "outputDirectory": "admin-dashboard/dist",
   "installCommand": "npm install",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/router?path=$1" },
+    { "source": "/api/:path*", "destination": "/api/router?path=:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
