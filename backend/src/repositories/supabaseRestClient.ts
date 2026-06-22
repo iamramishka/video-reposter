@@ -73,6 +73,8 @@ export class SupabaseRestClient {
         apikey: this.serviceRoleKey,
         Authorization: `Bearer ${this.serviceRoleKey}`,
         "Content-Type": "application/json",
+        "Accept-Profile": "vr",
+        "Content-Profile": "vr",
         ...options.headers
       },
       body: options.body ? JSON.stringify(options.body) : undefined
