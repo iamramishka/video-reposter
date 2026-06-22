@@ -2,10 +2,8 @@
   "buildCommand": "npm run build:production",
   "outputDirectory": "admin-dashboard/dist",
   "installCommand": "npm install",
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
