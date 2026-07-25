@@ -29,7 +29,7 @@
     "db:seed": "npm run db:seed -w backend"
   },
   "devDependencies": {
-    "concurrently": "^10.0.3",
+    "concurrently": "^10.0.4",
     "husky": "^9.1.7"
   },
   "overrides": {
